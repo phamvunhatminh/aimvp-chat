@@ -59,7 +59,7 @@ The dev server is pinned to port 3000 because OpenRouter only accepts `localhost
 | `npm test`                   | Unit tests (Vitest, fake IndexedDB)                               |
 | `npm run test:e2e`           | Browser tests (Playwright) against the production build, mocked API |
 | `npm run build`              | Production build to `dist/`                                       |
-| `npm run cf:dev`             | Build and serve with the real Cloudflare runtime and headers      |
+| `npm run cf:dev`             | Build and serve with the Cloudflare runtime and real headers      |
 | `npm run deploy`             | Build and deploy with Wrangler                                    |
 
 First run of the e2e tests on a new machine: `npx playwright install chromium`.
@@ -69,8 +69,9 @@ First run of the e2e tests on a new machine: `npx playwright install chromium`.
 1. Add the `aimvp.app` domain to your Cloudflare account. `wrangler.jsonc` attaches it as a custom domain.
 2. Pick one:
    - **Git integration (recommended):** Cloudflare dashboard → Workers & Pages → Create → Import a repository →
-     select this repo. Build command `npm run build`, deploy command `npx wrangler deploy`. Every push to `main`
-     deploys, and other branches get preview URLs.
+     select this repo and keep the defaults (deploy command `npx wrangler deploy`; the build command can stay
+     empty because `wrangler.jsonc` runs `npm run build` before every deploy). Every push to `main` deploys, and
+     other branches get preview URLs.
    - **From your machine:** `npx wrangler login`, then `npm run deploy`.
 
 No secrets or environment variables are needed: the app holds no keys of its own.
