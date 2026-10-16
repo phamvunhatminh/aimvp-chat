@@ -1,6 +1,6 @@
 import { httpError, readErrorBody } from './errors'
 import { streamChatCompletions, toChatCompletionsMessages } from './openai-compatible'
-import type { ModelInfo, ProviderClient } from './types'
+import { makesImages, type ModelInfo, type ProviderClient } from './types'
 
 export const OPENROUTER_API = 'https://openrouter.ai/api/v1'
 
@@ -36,7 +36,10 @@ export const openrouter: ProviderClient = {
     if (!res.ok) throw httpError('openrouter', res.status, (await readErrorBody(res)).message)
     const body = (await res.json()) as { data: ORModel[] }
     return body.data
-      .filter((m) => m.architecture?.output_modalities?.includes('text') ?? true)
+      .filter((m) => {
+        const out = m.architecture?.output_modalities
+        return !out || out.includes('text') || out.includes('image')
+      })
       .map(
         (m): ModelInfo => ({
           id: m.id,
@@ -48,6 +51,9 @@ export const openrouter: ProviderClient = {
             image: m.architecture.input_modalities.includes('image'),
             pdf: m.architecture.input_modalities.includes('file'),
           },
+          outputs: m.architecture?.output_modalities?.includes('image')
+            ? { image: true, text: m.architecture.output_modalities.includes('text') }
+            : undefined,
         }),
       )
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -57,12 +63,19 @@ export const openrouter: ProviderClient = {
     await fetchKeyInfo(apiKey, signal)
   },
 
-  streamChat({ apiKey, model, messages, signal }) {
+  streamChat({ apiKey, model, modelInfo, messages, signal }) {
     return streamChatCompletions({
       provider: 'openrouter',
       url: `${OPENROUTER_API}/chat/completions`,
       apiKey,
-      body: { model, messages: toChatCompletionsMessages(messages), stream: true, usage: { include: true } },
+      body: {
+        model,
+        messages: toChatCompletionsMessages(messages),
+        stream: true,
+        usage: { include: true },
+        // Image models only return images when asked for them.
+        ...(makesImages(modelInfo) ? { modalities: modelInfo?.outputs?.text === false ? ['image'] : ['image', 'text'] } : {}),
+      },
       signal,
     })
   },

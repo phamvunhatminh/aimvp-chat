@@ -15,7 +15,7 @@ import { conversationToMarkdown, slugify } from '@/lib/export-chat'
 import type { PreparedFile } from '@/lib/files'
 import { parseModelRef, PROVIDERS } from '@/lib/providers'
 import { createConversation, updateConversation } from '@/lib/repo'
-import { useModelName } from '@/stores/models'
+import { useModelInfo, useModelName } from '@/stores/models'
 import { addFiles } from '@/stores/composer'
 import { connectedProviders, useSettings } from '@/stores/settings'
 import { useIsStreaming } from '@/stores/streams'
@@ -41,6 +41,7 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
   const setDraft = useUI((s) => s.setDraft)
   const resetDraft = useUI((s) => s.resetDraft)
   const streaming = useIsStreaming(id)
+  const modelInfo = useModelInfo(conversation?.model ?? draft.model ?? defaultModel)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -118,7 +119,13 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
           onStop={() => id && stopStreaming(id)}
           streaming={streaming}
           modelRef={model}
-          placeholder={project && newChatProjectId ? `New chat in ${project.name}…` : undefined}
+          placeholder={
+            modelInfo?.outputs?.image
+              ? 'Describe the image you want…'
+              : project && newChatProjectId
+                ? `New chat in ${project.name}…`
+                : undefined
+          }
         />
       ) : (
         (hasMessages || newChatProjectId) && <ReconnectBar />

@@ -1,11 +1,13 @@
 import { readSSE } from '@/lib/sse'
 import { httpError, ProviderError, readErrorBody, type ApiErrorBody } from './errors'
-import { textOf, type ChatMessage, type ModelInfo, type ProviderClient, type StreamEvent } from './types'
+import { makesImages, textOf, type ChatMessage, type ModelInfo, type ProviderClient, type StreamEvent } from './types'
 
 const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta'
 
-// Keep text chat models; skip embeddings, image/video/audio generation and live APIs.
-const NOT_CHAT = /(embedding|imagen|veo|tts|image|aqa|live|native-audio|robotics|computer-use)/
+// Keep text and image chat models; skip embeddings, Imagen/Veo (other APIs), audio and live models.
+const NOT_CHAT = /(embedding|imagen|veo|tts|aqa|live|native-audio|robotics|computer-use)/
+/** Gemini models that can answer with images, e.g. gemini-2.5-flash-image. */
+const IMAGE_MODEL = /-image/
 
 interface GeminiModel {
   name: string
@@ -18,7 +20,10 @@ interface GeminiModel {
 interface GeminiChunk {
   error?: ApiErrorBody
   promptFeedback?: { blockReason?: string }
-  candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] }; finishReason?: string }[]
+  candidates?: {
+    content?: { parts?: { text?: string; thought?: boolean; inlineData?: { mimeType?: string; data?: string } }[] }
+    finishReason?: string
+  }[]
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number }
 }
 
@@ -86,6 +91,7 @@ export const google: ProviderClient = {
           maxOutputTokens: m.outputTokenLimit,
           // Gemini models are multimodal: images and PDFs as inline data.
           inputs: { image: true, pdf: true },
+          outputs: IMAGE_MODEL.test(id) ? { image: true, text: true } : undefined,
         })
       }
       pageToken = body.nextPageToken
@@ -98,7 +104,7 @@ export const google: ProviderClient = {
     await geminiFetch('/models?pageSize=1', apiKey, { signal })
   },
 
-  async *streamChat({ apiKey, model, messages, signal }): AsyncGenerator<StreamEvent> {
+  async *streamChat({ apiKey, model, modelInfo, messages, signal }): AsyncGenerator<StreamEvent> {
     const system = messages
       .filter((m) => m.role === 'system')
       .map((m) => textOf(m.content))
@@ -108,6 +114,9 @@ export const google: ProviderClient = {
       body: JSON.stringify({
         contents: toGeminiContents(messages),
         ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+        ...(makesImages(modelInfo) || IMAGE_MODEL.test(model)
+          ? { generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } }
+          : {}),
       }),
       signal,
     })
@@ -131,6 +140,11 @@ export const google: ProviderClient = {
       }
       const candidate = chunk.candidates?.[0]
       for (const part of candidate?.content?.parts ?? []) {
+        if (part.inlineData?.data) {
+          wroteText = true
+          yield { type: 'image', mimeType: part.inlineData.mimeType ?? 'image/png', data: part.inlineData.data }
+          continue
+        }
         if (!part.text) continue
         if (part.thought) yield { type: 'reasoning', text: part.text }
         else {

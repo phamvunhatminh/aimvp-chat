@@ -20,7 +20,12 @@ export interface ModelInfo {
   reasoning?: boolean
   /** What the model can read besides text, when the provider says (absent = unknown). */
   inputs?: { image?: boolean; pdf?: boolean }
+  /** What the model produces (absent = text only). */
+  outputs?: { image?: boolean; text?: boolean }
 }
+
+/** The model makes images (possibly alongside text). */
+export const makesImages = (m: ModelInfo | undefined) => m?.outputs?.image === true
 
 export type ContentPart =
   | { type: 'text'; text: string }
@@ -62,6 +67,14 @@ export type StreamEvent =
   | { type: 'content'; text: string }
   | { type: 'reasoning'; text: string }
   | { type: 'usage'; usage: Usage }
+  /** A generated image, base64. */
+  | { type: 'image'; mimeType: string; data: string }
+
+/** Splits a `data:image/png;base64,...` URL; null for anything else. */
+export function parseDataUrl(url: string): { mimeType: string; data: string } | null {
+  const match = /^data:([\w/+.-]+);base64,(.+)$/s.exec(url)
+  return match ? { mimeType: match[1], data: match[2] } : null
+}
 
 export interface ChatRequest {
   apiKey: string

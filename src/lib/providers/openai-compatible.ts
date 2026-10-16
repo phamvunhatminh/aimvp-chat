@@ -1,10 +1,17 @@
 import { readSSE } from '@/lib/sse'
 import { httpError, readErrorBody, type ApiErrorBody } from './errors'
-import { documentAsText, type ChatMessage, type ProviderId, type StreamEvent } from './types'
+import { documentAsText, parseDataUrl, type ChatMessage, type ProviderId, type StreamEvent } from './types'
 
 interface ChunkPayload {
   error?: ApiErrorBody
-  choices?: { delta?: { content?: string | null; reasoning?: string | null } }[]
+  choices?: {
+    delta?: {
+      content?: string | null
+      reasoning?: string | null
+      /** Generated images (OpenRouter image models). */
+      images?: { image_url?: { url?: string } }[]
+    }
+  }[]
   usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number }
 }
 
@@ -64,6 +71,10 @@ export async function* streamChatCompletions(opts: {
     const delta = chunk.choices?.[0]?.delta
     if (delta?.reasoning) yield { type: 'reasoning', text: delta.reasoning }
     if (delta?.content) yield { type: 'content', text: delta.content }
+    for (const image of delta?.images ?? []) {
+      const parsed = parseDataUrl(image.image_url?.url ?? '')
+      if (parsed) yield { type: 'image', ...parsed }
+    }
     if (chunk.usage) {
       yield {
         type: 'usage',

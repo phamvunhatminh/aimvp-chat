@@ -71,7 +71,7 @@ describe('model references', () => {
 })
 
 describe('OpenRouter', () => {
-  it('lists text models sorted by name', async () => {
+  it('lists text and image models sorted by name', async () => {
     mockFetch(
       jsonResponse({
         data: [
@@ -81,7 +81,7 @@ describe('OpenRouter', () => {
         ],
       }),
     )
-    expect((await openrouter.listModels(null)).map((m) => m.id)).toEqual(['a/y', 'b/x'])
+    expect((await openrouter.listModels(null)).map((m) => m.id)).toEqual(['a/y', 'img/z', 'b/x'])
   })
 
   it('streams content, reasoning and usage with cost', async () => {
@@ -131,7 +131,7 @@ describe('OpenRouter', () => {
 })
 
 describe('OpenAI', () => {
-  it('lists only chat models, newest first', async () => {
+  it('lists chat and image models, newest first', async () => {
     const fetchMock = mockFetch(
       jsonResponse({
         data: [
@@ -149,7 +149,7 @@ describe('OpenAI', () => {
         ],
       }),
     )
-    expect((await openai.listModels('sk')).map((m) => m.id)).toEqual(['gpt-5', 'o3', 'gpt-4o-mini'])
+    expect((await openai.listModels('sk')).map((m) => m.id)).toEqual(['gpt-image-1', 'dall-e-3', 'gpt-5', 'o3', 'gpt-4o-mini'])
     expect(requestOf(fetchMock).headers.get('Authorization')).toBe('Bearer sk')
   })
 
@@ -442,5 +442,60 @@ describe('images and documents', () => {
       ['gpt-5', true],
       ['gpt-3.5-turbo', false],
     ])
+  })
+})
+
+describe('image generation', () => {
+  const prompt = [{ role: 'user' as const, content: 'A red fox' }]
+
+  it('OpenRouter image models ask for images and stream them back', async () => {
+    const fetchMock = mockFetch(
+      sseResponse([
+        dataEvent({ choices: [{ delta: { content: 'Here you go', images: [{ image_url: { url: 'data:image/png;base64,UE5H' } }] } }] }),
+        'data: [DONE]\n\n',
+      ]),
+    )
+    const events = await collect(openrouter, {
+      apiKey: 'k',
+      model: 'google/gemini-image',
+      modelInfo: { id: 'google/gemini-image', name: 'Image', outputs: { image: true, text: true } },
+      messages: prompt,
+    })
+    expect(events).toEqual([
+      { type: 'content', text: 'Here you go' },
+      { type: 'image', mimeType: 'image/png', data: 'UE5H' },
+    ])
+    expect(requestOf(fetchMock).body.modalities).toEqual(['image', 'text'])
+  })
+
+  it('OpenAI image models use the Images API', async () => {
+    const fetchMock = mockFetch(
+      jsonResponse({ data: [{ b64_json: 'SU1H' }], output_format: 'png', usage: { input_tokens: 9, output_tokens: 100 } }),
+    )
+    expect(await collect(openai, { apiKey: 'sk', model: 'gpt-image-1', messages: prompt })).toEqual([
+      { type: 'image', mimeType: 'image/png', data: 'SU1H' },
+      { type: 'usage', usage: { promptTokens: 9, completionTokens: 100 } },
+    ])
+    const req = requestOf(fetchMock)
+    expect(req.url).toBe('https://api.openai.com/v1/images/generations')
+    expect(req.body).toEqual({ model: 'gpt-image-1', prompt: 'A red fox', n: 1 })
+  })
+
+  it('OpenAI lists image models separately from chat models', async () => {
+    mockFetch(jsonResponse({ data: [{ id: 'gpt-image-1', created: 5 }, { id: 'dall-e-2', created: 1 }, { id: 'gpt-5', created: 4 }] }))
+    expect((await openai.listModels('sk')).map((m) => [m.id, m.outputs?.image ?? false])).toEqual([
+      ['gpt-image-1', true],
+      ['gpt-5', false],
+    ])
+  })
+
+  it('Gemini image models return inline images', async () => {
+    const fetchMock = mockFetch(
+      sseResponse([dataEvent({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'R0VN' } }] } }] })]),
+    )
+    expect(await collect(google, { apiKey: 'k', model: 'gemini-2.5-flash-image', messages: prompt })).toEqual([
+      { type: 'image', mimeType: 'image/png', data: 'R0VN' },
+    ])
+    expect(requestOf(fetchMock).body.generationConfig).toEqual({ responseModalities: ['TEXT', 'IMAGE'] })
   })
 })

@@ -3,7 +3,7 @@ import { findModel } from '@/stores/models'
 import { useSettings } from '@/stores/settings'
 import { useStreams } from '@/stores/streams'
 import { useUI } from '@/stores/ui'
-import { bytesToBase64 } from './base64'
+import { base64ToBytes, bytesToBase64 } from './base64'
 import type { Attachment, Message } from './db'
 import type { PreparedFile } from './files'
 import {
@@ -16,6 +16,7 @@ import {
   type ContentPart,
   type Usage,
 } from './providers'
+import { newId } from './utils'
 import {
   addMessage,
   deleteMessages,
@@ -157,6 +158,7 @@ async function runCompletion(conversationId: string): Promise<void> {
   let content = ''
   let reasoning = ''
   let usage: Usage | null = null
+  const images: Attachment[] = []
   let flushTimer: ReturnType<typeof setTimeout> | null = null
   let lastPersist = Date.now()
 
@@ -181,7 +183,22 @@ async function runCompletion(conversationId: string): Promise<void> {
     for await (const event of stream) {
       if (event.type === 'content') content += event.text
       else if (event.type === 'reasoning') reasoning += event.text
-      else usage = event.usage
+      else if (event.type === 'usage') usage = event.usage
+      else {
+        // Generated images are saved right away and shown as soon as they arrive.
+        const bytes = base64ToBytes(event.data)
+        const ext = event.mimeType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'png'
+        images.push({
+          id: newId(),
+          kind: 'image',
+          name: `image-${images.length + 1}.${ext}`,
+          mimeType: event.mimeType,
+          size: bytes.byteLength,
+          text: '',
+          blobId: await saveBlob(bytes.buffer, event.mimeType),
+        })
+        await updateMessage(reply.id, { attachments: [...images] })
+      }
       flushTimer ??= setTimeout(flushDraft, UI_FLUSH_MS)
       // Save progress now and then so a closed tab keeps most of the reply.
       if (Date.now() - lastPersist > PERSIST_MS) {
@@ -195,7 +212,7 @@ async function runCompletion(conversationId: string): Promise<void> {
     flushDraft()
     if (controller.signal.aborted) {
       // Stopped by the user: keep whatever arrived, drop the reply if nothing did.
-      if (content || reasoning) await updateMessage(reply.id, { content, reasoning, usage, status: 'done' })
+      if (content || reasoning || images.length) await updateMessage(reply.id, { content, reasoning, usage, status: 'done' })
       else await deleteMessages(conversationId, (m) => m.id === reply.id)
     } else {
       await updateMessage(reply.id, { content, reasoning, status: 'error', error: errorMessage(err, providerName) })

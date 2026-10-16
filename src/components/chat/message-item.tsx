@@ -114,11 +114,13 @@ function AssistantMessage({ message, isLast, busy }: { message: Message; isLast:
         </details>
       )}
 
+      <MessageAttachments attachments={message.attachments ?? []} />
+
       {content ? (
         <Suspense fallback={<div className="markdown whitespace-pre-wrap">{content}</div>}>
           <Markdown content={content} />
         </Suspense>
-      ) : streaming && !reasoning ? (
+      ) : streaming && !reasoning && !message.attachments?.length ? (
         <TypingIndicator />
       ) : null}
 

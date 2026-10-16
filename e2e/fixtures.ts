@@ -1,4 +1,5 @@
 import { test as base, expect, type BrowserContext, type Page } from '@playwright/test'
+import { makePng } from './files'
 
 export const MODELS = [
   { id: 'openrouter/auto', name: 'Auto Router', pricing: { prompt: '-1', completion: '-1' } },
@@ -13,8 +14,13 @@ export const MODELS = [
     name: 'Text Only Model',
     architecture: { input_modalities: ['text'], output_modalities: ['text'] },
   },
+  {
+    id: 'img/painter',
+    name: 'Painter',
+    architecture: { input_modalities: ['text', 'image'], output_modalities: ['image', 'text'] },
+  },
   { id: 'openai/broke', name: 'OpenAI: Out Of Credits', pricing: { prompt: '0.00000015', completion: '0.0000006' } },
-  { id: 'image/only', name: 'Image Only', architecture: { output_modalities: ['image'] } },
+  { id: 'audio/only', name: 'Audio Only', architecture: { output_modalities: ['audio'] } },
 ]
 
 export const ANSWER = [
@@ -30,6 +36,9 @@ export const ANSWER = [
 ].join('\n')
 
 export const OAUTH_KEY = 'sk-or-v1-oauth-0123456789'
+
+/** What the mocked image model "paints". */
+export const PAINTED_PNG = makePng(32, 32, [30, 90, 220])
 
 export interface OpenRouterMock {
   /** Parsed JSON bodies of chat completion requests, in order. */
@@ -157,6 +166,14 @@ async function mockOpenRouter(context: BrowserContext): Promise<OpenRouterMock> 
     if (path === '/api/v1/chat/completions') {
       const body = request.postDataJSON()
       mock.chatRequests.push(body)
+      if (body.model === 'img/painter') {
+        const image = `data:image/png;base64,${PAINTED_PNG.toString('base64')}`
+        const chunk = { choices: [{ delta: { content: 'A blue square.', images: [{ image_url: { url: image } }] } }] }
+        return route.fulfill({
+          body: `data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`,
+          headers: { ...headers, 'Content-Type': 'text/event-stream' },
+        })
+      }
       if (body.model === 'openai/broke') {
         return route.fulfill({ status: 402, json: { error: { code: 402, message: 'Insufficient credits' } }, headers })
       }

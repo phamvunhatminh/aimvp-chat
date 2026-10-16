@@ -202,6 +202,27 @@ describe('attachments', () => {
   })
 })
 
+describe('generated images', () => {
+  it('saves images from the reply as attachments', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        sseResponse([
+          dataEvent({ choices: [{ delta: { images: [{ image_url: { url: 'data:image/png;base64,AQID' } }] } }] }),
+          'data: [DONE]\n\n',
+        ]),
+      ),
+    )
+    const c = await createConversation({ model: 'openrouter:img/model', systemPrompt: '' })
+    await sendMessage(c.id, 'A fox')
+    const [, reply] = await getMessages(c.id)
+    expect(reply).toMatchObject({ status: 'done', content: '' })
+    expect(reply.attachments).toMatchObject([{ kind: 'image', name: 'image-1.png', mimeType: 'image/png', size: 3 }])
+    const blob = await db.blobs.get(reply.attachments[0].blobId!)
+    expect(Array.from(new Uint8Array(blob!.data))).toEqual([1, 2, 3])
+  })
+})
+
 describe('regenerate and edit', () => {
   it('regenerate replaces the last reply', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(reply('first')).mockResolvedValueOnce(reply('second')))
