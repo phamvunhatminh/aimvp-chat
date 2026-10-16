@@ -63,7 +63,7 @@ export const openrouter: ProviderClient = {
     await fetchKeyInfo(apiKey, signal)
   },
 
-  streamChat({ apiKey, model, modelInfo, messages, signal }) {
+  streamChat({ apiKey, model, modelInfo, messages, webSearch, signal }) {
     return streamChatCompletions({
       provider: 'openrouter',
       url: `${OPENROUTER_API}/chat/completions`,
@@ -75,6 +75,8 @@ export const openrouter: ProviderClient = {
         usage: { include: true },
         // Image models only return images when asked for them.
         ...(makesImages(modelInfo) ? { modalities: modelInfo?.outputs?.text === false ? ['image'] : ['image', 'text'] } : {}),
+        // OpenRouter's search tool: the model's own provider search where it has one, else Exa.
+        ...(webSearch ? { tools: [{ type: 'openrouter:web_search' }] } : {}),
       },
       signal,
     })

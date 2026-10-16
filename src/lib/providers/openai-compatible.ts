@@ -1,6 +1,28 @@
 import { readSSE } from '@/lib/sse'
 import { httpError, readErrorBody, type ApiErrorBody } from './errors'
-import { documentAsText, parseDataUrl, type ChatMessage, type ProviderId, type StreamEvent } from './types'
+import {
+  documentAsText,
+  parseDataUrl,
+  toSource,
+  type ChatMessage,
+  type ProviderId,
+  type Source,
+  type StreamEvent,
+} from './types'
+
+/**
+ * A web citation on a reply. Chat Completions nests the link in `url_citation`;
+ * the Responses API puts it on the annotation itself.
+ */
+export type Annotation = { type?: string; url?: string; title?: string; url_citation?: { url?: string; title?: string } }
+
+export function sourcesOf(annotations: Annotation[] | undefined): Source[] {
+  return (annotations ?? []).flatMap((a) => {
+    if (a.type !== 'url_citation') return []
+    const link = a.url_citation ?? a
+    return toSource(link.url, link.title) ?? []
+  })
+}
 
 interface ChunkPayload {
   error?: ApiErrorBody
@@ -10,7 +32,10 @@ interface ChunkPayload {
       reasoning?: string | null
       /** Generated images (OpenRouter image models). */
       images?: { image_url?: { url?: string } }[]
+      /** Web citations (OpenRouter web search). */
+      annotations?: Annotation[]
     }
+    message?: { annotations?: Annotation[] }
   }[]
   usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number }
 }
@@ -75,6 +100,8 @@ export async function* streamChatCompletions(opts: {
       const parsed = parseDataUrl(image.image_url?.url ?? '')
       if (parsed) yield { type: 'image', ...parsed }
     }
+    const sources = sourcesOf(delta?.annotations ?? chunk.choices?.[0]?.message?.annotations)
+    if (sources.length) yield { type: 'sources', sources }
     if (chunk.usage) {
       yield {
         type: 'usage',

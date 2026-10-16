@@ -22,6 +22,8 @@ export interface ModelInfo {
   inputs?: { image?: boolean; pdf?: boolean }
   /** What the model produces (absent = text only). */
   outputs?: { image?: boolean; text?: boolean }
+  /** False when the provider says the model can't search the web (absent = assume it can). */
+  webSearch?: boolean
 }
 
 /** The model makes images (possibly alongside text). */
@@ -63,12 +65,26 @@ export interface Usage {
   cost?: number
 }
 
+/** A web page a reply drew on. */
+export interface Source {
+  url: string
+  title: string
+}
+
 export type StreamEvent =
   | { type: 'content'; text: string }
   | { type: 'reasoning'; text: string }
   | { type: 'usage'; usage: Usage }
   /** A generated image, base64. */
   | { type: 'image'; mimeType: string; data: string }
+  /** Web pages found or cited by a web search. */
+  | { type: 'sources'; sources: Source[] }
+
+/** Only http(s) links are kept as sources, so a reply can't smuggle in `javascript:` URLs. */
+export function toSource(url: unknown, title: unknown): Source | null {
+  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return null
+  return { url, title: typeof title === 'string' && title.trim() ? title.trim() : new URL(url).hostname }
+}
 
 /** Splits a `data:image/png;base64,...` URL; null for anything else. */
 export function parseDataUrl(url: string): { mimeType: string; data: string } | null {
@@ -82,6 +98,8 @@ export interface ChatRequest {
   /** Catalog entry for `model`, when known. */
   modelInfo?: ModelInfo
   messages: ChatMessage[]
+  /** Let the model search the web and cite what it finds. */
+  webSearch?: boolean
   signal?: AbortSignal
 }
 

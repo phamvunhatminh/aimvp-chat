@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie'
-import { normalizeModelRef, type Usage } from './providers'
+import { normalizeModelRef, type Source, type Usage } from './providers'
 
 /**
  * Every record has a client-generated UUID, `updatedAt` and a `deletedAt`
@@ -26,6 +26,8 @@ export interface Conversation {
   /** Model reference, `provider:model-id`. */
   model: string
   systemPrompt: string
+  /** Replies may search the web (absent in chats from before web search). */
+  webSearch?: boolean
   createdAt: number
   updatedAt: number
   deletedAt: number | null
@@ -78,6 +80,12 @@ export interface Message {
   status: MessageStatus
   error: string | null
   usage: Usage | null
+  /** Web pages an assistant reply searched or cited. */
+  sources?: Source[]
+  /** The reply was asked for with web search on. */
+  webSearch?: boolean
+  /** How long the reply took: to its first token, and in all (absent before this was recorded). */
+  timing?: { firstTokenMs: number; totalMs: number } | null
   createdAt: number
   updatedAt: number
   deletedAt: number | null

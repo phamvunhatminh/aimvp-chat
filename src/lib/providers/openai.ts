@@ -1,6 +1,14 @@
+import { readSSE } from '@/lib/sse'
 import { httpError, readErrorBody, type ApiErrorBody } from './errors'
-import { streamChatCompletions, toChatCompletionsMessages } from './openai-compatible'
-import { textOf, type ChatRequest, type ModelInfo, type ProviderClient, type StreamEvent } from './types'
+import { sourcesOf, streamChatCompletions, toChatCompletionsMessages, type Annotation } from './openai-compatible'
+import {
+  textOf,
+  type ChatMessage,
+  type ChatRequest,
+  type ModelInfo,
+  type ProviderClient,
+  type StreamEvent,
+} from './types'
 
 const OPENAI_API = 'https://api.openai.com/v1'
 
@@ -63,6 +71,79 @@ async function* generateImage({ apiKey, model, messages, signal }: ChatRequest):
   }
 }
 
+/** Responses API input: same turns, with its own content part types. */
+export function toResponsesInput(messages: ChatMessage[]) {
+  return messages.map((m) => ({
+    role: m.role,
+    content:
+      typeof m.content === 'string'
+        ? m.content
+        : m.content.map((p) => {
+            if (p.type === 'image') return { type: 'input_image', image_url: `data:${p.mimeType};base64,${p.data}` }
+            if (p.type === 'document') {
+              return { type: 'input_file', filename: p.name, file_data: `data:application/pdf;base64,${p.data}` }
+            }
+            return { type: m.role === 'assistant' ? 'output_text' : 'input_text', text: p.text }
+          }),
+  }))
+}
+
+interface ResponsesEvent {
+  type: string
+  delta?: string
+  annotation?: Annotation
+  response?: {
+    usage?: { input_tokens?: number; output_tokens?: number }
+    error?: { message?: string } | null
+    output?: { content?: { annotations?: Annotation[] }[] }[]
+  }
+  message?: string
+}
+
+/**
+ * Web search needs OpenAI's Responses API (Chat Completions only searches with the
+ * `*-search-*` models), so searching replies stream from there.
+ */
+async function* streamWithWebSearch({ apiKey, model, messages, signal }: ChatRequest): AsyncGenerator<StreamEvent> {
+  const res = await openaiFetch('/responses', apiKey, {
+    method: 'POST',
+    body: JSON.stringify({ model, input: toResponsesInput(messages), tools: [{ type: 'web_search' }], stream: true }),
+    signal,
+  })
+  if (!res.body) throw httpError('openai', res.status, 'OpenAI returned an empty response.')
+  let cited = false
+  for await (const data of readSSE(res.body)) {
+    let event: ResponsesEvent
+    try {
+      event = JSON.parse(data)
+    } catch {
+      continue
+    }
+    if (event.type === 'response.output_text.delta' && event.delta) yield { type: 'content', text: event.delta }
+    else if (event.type === 'response.reasoning_summary_text.delta' && event.delta) {
+      yield { type: 'reasoning', text: event.delta }
+    } else if (event.type === 'response.output_text.annotation.added') {
+      const sources = sourcesOf(event.annotation ? [event.annotation] : [])
+      if (sources.length) {
+        cited = true
+        yield { type: 'sources', sources }
+      }
+    } else if (event.type === 'response.completed') {
+      if (!cited) {
+        const annotations = event.response?.output?.flatMap((o) => o.content?.flatMap((c) => c.annotations ?? []) ?? [])
+        const sources = sourcesOf(annotations)
+        if (sources.length) yield { type: 'sources', sources }
+      }
+      const usage = event.response?.usage
+      if (usage) {
+        yield { type: 'usage', usage: { promptTokens: usage.input_tokens ?? 0, completionTokens: usage.output_tokens ?? 0 } }
+      }
+    } else if (event.type === 'response.failed' || event.type === 'error') {
+      throw httpError('openai', null, event.response?.error?.message ?? event.message ?? 'OpenAI stopped the reply.')
+    }
+  }
+}
+
 export const TRANSCRIBE_MODEL = 'gpt-4o-mini-transcribe'
 export const SPEECH_MODEL = 'gpt-4o-mini-tts'
 /** Speech to text. `language` (e.g. `vi-VN`) is a hint; empty lets the model detect it. */
@@ -107,6 +188,7 @@ export const openai: ProviderClient = {
 
   streamChat(request) {
     if (IMAGE_MODEL.test(request.model)) return generateImage(request)
+    if (request.webSearch) return streamWithWebSearch(request)
     const { apiKey, model, messages, signal } = request
     return streamChatCompletions({
       provider: 'openai',

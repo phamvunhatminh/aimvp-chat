@@ -1,4 +1,4 @@
-import { PaperclipIcon } from 'lucide-react'
+import { GlobeIcon, PaperclipIcon } from 'lucide-react'
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { ChatHeader } from '@/components/chat/chat-header'
@@ -16,6 +16,7 @@ import type { PreparedFile } from '@/lib/files'
 import { parseModelRef, PROVIDERS } from '@/lib/providers'
 import { stopReading } from '@/lib/read-aloud'
 import { createConversation, updateConversation } from '@/lib/repo'
+import { cn } from '@/lib/utils'
 import { useModelInfo, useModelName } from '@/stores/models'
 import { addFiles } from '@/stores/composer'
 import { connectedProviders, useSettings } from '@/stores/settings'
@@ -62,6 +63,8 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
 
   const model = conversation?.model ?? draft.model ?? defaultModel
   const systemPrompt = conversation?.systemPrompt ?? draft.systemPrompt ?? defaultSystemPrompt
+  const webSearch = conversation ? !!conversation.webSearch : draft.webSearch
+  const canSearch = !modelInfo?.outputs?.image && modelInfo?.webSearch !== false
   const hasMessages = !!messages && messages.length > 0
   const hasAnyKey = connectedProviders(apiKeys).length > 0
   const needsKey = hasAnyKey && !apiKeys[parseModelRef(model).provider]
@@ -71,7 +74,7 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
       void sendMessage(conversation.id, text, files)
       return
     }
-    const created = await createConversation({ model, systemPrompt, projectId: newChatProjectId ?? null })
+    const created = await createConversation({ model, systemPrompt, webSearch, projectId: newChatProjectId ?? null })
     resetDraft()
     navigate(`/c/${created.id}`)
     void sendMessage(created.id, text, files)
@@ -124,6 +127,18 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
           onStop={() => id && stopStreaming(id)}
           streaming={streaming}
           modelRef={model}
+          tools={
+            canSearch && (
+              <WebSearchToggle
+                on={webSearch}
+                onChange={(next) =>
+                  conversation
+                    ? void updateConversation(conversation.id, { webSearch: next })
+                    : setDraft({ webSearch: next })
+                }
+              />
+            )
+          }
           placeholder={
             modelInfo?.outputs?.image
               ? 'Describe the image you want…'
@@ -136,6 +151,30 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
         (hasMessages || newChatProjectId) && <ReconnectBar />
       )}
     </FileDropZone>
+  )
+}
+
+/** Lets the model search the web for this chat's replies. */
+function WebSearchToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size={on ? 'sm' : 'icon'}
+      aria-pressed={on}
+      aria-label="Search the web"
+      onClick={() => onChange(!on)}
+      title={on ? 'Web search is on' : 'Search the web'}
+      className={cn(
+        'rounded-full',
+        on
+          ? 'h-9 bg-sky-500/10 px-3 text-sky-700 hover:bg-sky-500/15 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-400'
+          : 'text-muted-foreground',
+      )}
+    >
+      <GlobeIcon />
+      {on && 'Search'}
+    </Button>
   )
 }
 

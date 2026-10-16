@@ -35,6 +35,8 @@ export const ANSWER = [
   '<script>window.__pwned = true</script>',
 ].join('\n')
 
+export const SEARCH_ANSWER = 'Here is what the web says.'
+
 export const OAUTH_KEY = 'sk-or-v1-oauth-0123456789'
 
 /** What the mocked image model "paints". */
@@ -177,6 +179,23 @@ async function mockOpenRouter(context: BrowserContext): Promise<OpenRouterMock> 
       if (body.model === 'img/painter') {
         const image = `data:image/png;base64,${PAINTED_PNG.toString('base64')}`
         const chunk = { choices: [{ delta: { content: 'A blue square.', images: [{ image_url: { url: image } }] } }] }
+        return route.fulfill({
+          body: `data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`,
+          headers: { ...headers, 'Content-Type': 'text/event-stream' },
+        })
+      }
+      if (body.tools?.some((t: { type: string }) => t.type === 'openrouter:web_search')) {
+        const cite = (url: string, title: string) => ({ type: 'url_citation', url_citation: { url, title } })
+        const chunk = {
+          choices: [
+            {
+              delta: {
+                content: SEARCH_ANSWER,
+                annotations: [cite('https://news.example/today', 'Today in news'), cite('https://wiki.example/x', 'Wiki X')],
+              },
+            },
+          ],
+        }
         return route.fulfill({
           body: `data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`,
           headers: { ...headers, 'Content-Type': 'text/event-stream' },

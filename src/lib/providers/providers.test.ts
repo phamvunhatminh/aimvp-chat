@@ -523,3 +523,123 @@ describe('image generation', () => {
     expect(requestOf(fetchMock).body.generationConfig).toEqual({ responseModalities: ['TEXT', 'IMAGE'] })
   })
 })
+
+describe('web search', () => {
+  const searching = { apiKey: 'k', model: 'm', messages, webSearch: true }
+  const sources = (events: StreamEvent[]) => events.flatMap((e) => (e.type === 'sources' ? e.sources : []))
+
+  it('OpenRouter adds its search tool and reads url citations', async () => {
+    const citation = { type: 'url_citation', url_citation: { url: 'https://example.com/a', title: 'Example A' } }
+    const fetchMock = mockFetch(
+      sseResponse([
+        dataEvent({ choices: [{ delta: { content: 'Found it.', annotations: [citation] } }] }),
+        dataEvent({ choices: [{ delta: { annotations: [{ type: 'url_citation', url_citation: { url: 'javascript:alert(1)' } }] } }] }),
+        'data: [DONE]\n\n',
+      ]),
+    )
+    const events = await collect(openrouter, { ...searching, model: 'a/b' })
+    expect(sources(events)).toEqual([{ url: 'https://example.com/a', title: 'Example A' }])
+    expect(requestOf(fetchMock).body.tools).toEqual([{ type: 'openrouter:web_search' }])
+  })
+
+  it('Claude searches with the web search tool and cites results', async () => {
+    const stream = (stopReason: string, text: string, search: boolean) =>
+      sseResponse(
+        [
+          {
+            type: 'message_start',
+            message: { id: 'msg', type: 'message', role: 'assistant', model: 'm', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } },
+          },
+          ...(search
+            ? [
+                { type: 'content_block_start', index: 0, content_block: { type: 'server_tool_use', id: 'srv', name: 'web_search', input: {} } },
+                { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"query":"news"}' } },
+                { type: 'content_block_stop', index: 0 },
+                {
+                  type: 'content_block_start',
+                  index: 1,
+                  content_block: {
+                    type: 'web_search_tool_result',
+                    tool_use_id: 'srv',
+                    content: [{ type: 'web_search_result', url: 'https://news.example/1', title: 'News 1', encrypted_content: 'e', page_age: null }],
+                  },
+                },
+                { type: 'content_block_stop', index: 1 },
+              ]
+            : []),
+          { type: 'content_block_start', index: 2, content_block: { type: 'text', text: '' } },
+          ...(search
+            ? [
+                {
+                  type: 'content_block_delta',
+                  index: 2,
+                  delta: {
+                    type: 'citations_delta',
+                    citation: { type: 'web_search_result_location', url: 'https://news.example/1', title: 'News 1', cited_text: 'x', encrypted_index: 'i' },
+                  },
+                },
+              ]
+            : []),
+          { type: 'content_block_delta', index: 2, delta: { type: 'text_delta', text } },
+          { type: 'content_block_stop', index: 2 },
+          { type: 'message_delta', delta: { stop_reason: stopReason, stop_sequence: null }, usage: { output_tokens: 5 } },
+          { type: 'message_stop' },
+        ].map(namedEvent),
+      )
+    // The first turn pauses mid-search; the second finishes it.
+    const fetchMock = mockFetch(stream('pause_turn', 'Searching. ', true), stream('end_turn', 'Done.', false))
+    const events = await collect(anthropic, searching)
+
+    expect(events.filter((e) => e.type === 'content').map((e) => (e as { text: string }).text).join('')).toBe('Searching. Done.')
+    expect(sources(events)).toEqual([{ url: 'https://news.example/1', title: 'News 1' }])
+    expect(events.at(-1)).toEqual({ type: 'usage', usage: { promptTokens: 20, completionTokens: 10 } })
+    const first = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(first.tools).toEqual([{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }])
+    const second = JSON.parse(fetchMock.mock.calls[1][1].body)
+    expect(second.messages.at(-1).role).toBe('assistant')
+    expect(second.messages.at(-1).content.map((b: { type: string }) => b.type)).toEqual([
+      'server_tool_use',
+      'web_search_tool_result',
+      'text',
+    ])
+  })
+
+  it('Gemini grounds with Google Search', async () => {
+    const chunk = {
+      candidates: [
+        {
+          content: { parts: [{ text: 'Answer' }] },
+          finishReason: 'STOP',
+          groundingMetadata: { groundingChunks: [{ web: { uri: 'https://vertexaisearch.cloud.google.com/r/1', title: 'example.org' } }] },
+        },
+      ],
+    }
+    const fetchMock = mockFetch(sseResponse([dataEvent(chunk)]))
+    const events = await collect(google, { ...searching, model: 'gemini-2.5-flash' })
+    expect(sources(events)).toEqual([{ url: 'https://vertexaisearch.cloud.google.com/r/1', title: 'example.org' }])
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).tools).toEqual([{ google_search: {} }])
+  })
+
+  it('OpenAI searches through the Responses API', async () => {
+    const annotation = { type: 'url_citation', url: 'https://openai.example/x', title: 'X' }
+    const fetchMock = mockFetch(
+      sseResponse([
+        dataEvent({ type: 'response.created' }),
+        dataEvent({ type: 'response.output_text.delta', delta: 'Hi ' }),
+        dataEvent({ type: 'response.output_text.annotation.added', annotation: { ...annotation, start_index: 0, end_index: 2 } }),
+        dataEvent({ type: 'response.output_text.delta', delta: 'there' }),
+        dataEvent({ type: 'response.completed', response: { usage: { input_tokens: 7, output_tokens: 3 } } }),
+      ]),
+    )
+    const events = await collect(openai, { ...searching, model: 'gpt-5', messages: [{ role: 'user', content: 'hi' }] })
+    expect(events).toEqual([
+      { type: 'content', text: 'Hi ' },
+      { type: 'sources', sources: [{ url: 'https://openai.example/x', title: 'X' }] },
+      { type: 'content', text: 'there' },
+      { type: 'usage', usage: { promptTokens: 7, completionTokens: 3 } },
+    ])
+    const req = requestOf(fetchMock)
+    expect(req.url).toBe('https://api.openai.com/v1/responses')
+    expect(req.body).toMatchObject({ model: 'gpt-5', tools: [{ type: 'web_search' }], stream: true, input: [{ role: 'user', content: 'hi' }] })
+  })
+})

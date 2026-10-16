@@ -1,11 +1,23 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { httpError, networkError, ProviderError } from './errors'
-import { textOf, type ChatMessage, type ModelInfo, type ProviderClient, type StreamEvent } from './types'
+import {
+  textOf,
+  toSource,
+  type ChatMessage,
+  type ModelInfo,
+  type ProviderClient,
+  type Source,
+  type StreamEvent,
+} from './types'
 
 /** Used when the model's output limit is unknown (e.g. a model id typed by hand). */
 const FALLBACK_MAX_TOKENS = 16_000
 /** Plenty for a chat reply; the SDK needs streaming above ~16k, which we always use. */
 const MAX_TOKENS_CAP = 64_000
+/** Searches Claude may run for one reply. */
+const MAX_SEARCHES = 5
+/** A long search turn can pause; continue it at most this many times. */
+const MAX_CONTINUATIONS = 3
 
 function client(apiKey: string) {
   // The key is the user's own, entered in this browser; the SDK sends the
@@ -63,6 +75,8 @@ export const anthropic: ProviderClient = {
           inputs: m.capabilities
             ? { image: m.capabilities.image_input?.supported, pdf: m.capabilities.pdf_input?.supported }
             : undefined,
+          webSearch: (m.capabilities as { server_tools?: { web_search?: { supported?: boolean } } } | null)
+            ?.server_tools?.web_search?.supported,
         })
       }
     } catch (err) {
@@ -79,7 +93,7 @@ export const anthropic: ProviderClient = {
     }
   },
 
-  async *streamChat({ apiKey, model, modelInfo, messages, signal }): AsyncGenerator<StreamEvent> {
+  async *streamChat({ apiKey, model, modelInfo, messages, webSearch, signal }): AsyncGenerator<StreamEvent> {
     const system = messages
       .filter((m) => m.role === 'system')
       .map((m) => textOf(m.content))
@@ -95,38 +109,56 @@ export const anthropic: ProviderClient = {
       ...(system ? { system } : {}),
       // Summarized thinking streams while the model reasons, instead of a silent pause.
       ...(modelInfo?.reasoning ? { thinking: { type: 'adaptive', display: 'summarized' } } : {}),
+      ...(webSearch ? { tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: MAX_SEARCHES }] } : {}),
     }
 
     let wroteText = false
+    let promptTokens = 0
+    let completionTokens = 0
+    let cited = false
+    const found: Source[] = []
     try {
-      const stream = client(apiKey).messages.stream(params, { signal })
-      for await (const event of stream) {
-        if (event.type !== 'content_block_delta') continue
-        if (event.delta.type === 'text_delta') {
-          wroteText = true
-          yield { type: 'content', text: event.delta.text }
-        } else if (event.delta.type === 'thinking_delta') {
-          yield { type: 'reasoning', text: event.delta.thinking }
+      for (let turn = 0; ; turn++) {
+        const stream = client(apiKey).messages.stream(params, { signal })
+        for await (const event of stream) {
+          if (event.type === 'content_block_start' && event.content_block.type === 'web_search_tool_result') {
+            const results = event.content_block.content
+            if (Array.isArray(results)) found.push(...results.flatMap((r) => toSource(r.url, r.title) ?? []))
+          }
+          if (event.type !== 'content_block_delta') continue
+          if (event.delta.type === 'text_delta') {
+            wroteText = true
+            yield { type: 'content', text: event.delta.text }
+          } else if (event.delta.type === 'thinking_delta') {
+            yield { type: 'reasoning', text: event.delta.thinking }
+          } else if (event.delta.type === 'citations_delta' && event.delta.citation.type === 'web_search_result_location') {
+            const source = toSource(event.delta.citation.url, event.delta.citation.title)
+            if (source) {
+              cited = true
+              yield { type: 'sources', sources: [source] }
+            }
+          }
         }
+        const message = await stream.finalMessage()
+        promptTokens +=
+          message.usage.input_tokens +
+          (message.usage.cache_read_input_tokens ?? 0) +
+          (message.usage.cache_creation_input_tokens ?? 0)
+        completionTokens += message.usage.output_tokens
+        if (message.stop_reason === 'refusal') {
+          throw new ProviderError(
+            wroteText ? 'Claude stopped and declined to continue this reply.' : 'Claude declined to answer this request.',
+            null,
+            'anthropic',
+          )
+        }
+        // A paused search turn continues when its partial reply is sent back as is.
+        if (message.stop_reason !== 'pause_turn' || turn >= MAX_CONTINUATIONS) break
+        params.messages = [...turns, { role: 'assistant', content: message.content as Anthropic.ContentBlockParam[] }]
       }
-      const message = await stream.finalMessage()
-      yield {
-        type: 'usage',
-        usage: {
-          promptTokens:
-            message.usage.input_tokens +
-            (message.usage.cache_read_input_tokens ?? 0) +
-            (message.usage.cache_creation_input_tokens ?? 0),
-          completionTokens: message.usage.output_tokens,
-        },
-      }
-      if (message.stop_reason === 'refusal') {
-        throw new ProviderError(
-          wroteText ? 'Claude stopped and declined to continue this reply.' : 'Claude declined to answer this request.',
-          null,
-          'anthropic',
-        )
-      }
+      // Without inline citations, list what the searches found.
+      if (!cited && found.length) yield { type: 'sources', sources: found }
+      yield { type: 'usage', usage: { promptTokens, completionTokens } }
     } catch (err) {
       throw toProviderError(err)
     }

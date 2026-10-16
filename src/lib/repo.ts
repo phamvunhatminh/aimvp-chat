@@ -9,7 +9,7 @@ import {
   type SavedPrompt,
   type StoredBlob,
 } from './db'
-import { normalizeModelRef } from './providers'
+import { normalizeModelRef, toSource } from './providers'
 import { findMatch, foldText, searchableText, type TextMatch } from './search'
 import { newId } from './utils'
 
@@ -106,6 +106,7 @@ export async function createConversation(init: {
   systemPrompt: string
   projectId?: string | null
   title?: string
+  webSearch?: boolean
 }): Promise<Conversation> {
   const t = now()
   const conversation: Conversation = {
@@ -114,6 +115,7 @@ export async function createConversation(init: {
     title: init.title ?? NEW_CHAT_TITLE,
     model: init.model,
     systemPrompt: init.systemPrompt,
+    webSearch: init.webSearch ?? false,
     createdAt: t,
     updatedAt: t,
     deletedAt: null,
@@ -139,7 +141,7 @@ export async function listConversations(): Promise<Conversation[]> {
 
 export async function updateConversation(
   id: string,
-  patch: Partial<Pick<Conversation, 'title' | 'model' | 'systemPrompt' | 'projectId'>>,
+  patch: Partial<Pick<Conversation, 'title' | 'model' | 'systemPrompt' | 'projectId' | 'webSearch'>>,
 ): Promise<void> {
   await db.conversations
     .where('id')
@@ -149,7 +151,7 @@ export async function updateConversation(
 }
 
 /** Fields wiped from a tombstoned message, so deleted content doesn't linger. */
-const WIPED = { content: '', reasoning: '', attachments: [] as Attachment[] }
+const WIPED = { content: '', reasoning: '', attachments: [] as Attachment[], sources: [] }
 
 /** Tombstones the conversation and its messages, wiping their content and files. */
 export async function deleteConversation(id: string): Promise<void> {
@@ -198,7 +200,9 @@ export async function addMessage(
 
 export async function updateMessage(
   id: string,
-  patch: Partial<Pick<Message, 'content' | 'attachments' | 'reasoning' | 'status' | 'error' | 'usage'>>,
+  patch: Partial<
+    Pick<Message, 'content' | 'attachments' | 'reasoning' | 'status' | 'error' | 'usage' | 'sources' | 'timing'>
+  >,
 ): Promise<void> {
   await db.messages
     .where('id')
@@ -381,10 +385,17 @@ function toConversation(raw: unknown): Conversation | null {
     title: r.title,
     model: normalizeModelRef(r.model),
     systemPrompt: isString(r.systemPrompt) ? r.systemPrompt : '',
+    webSearch: r.webSearch === true,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     deletedAt: isNumber(r.deletedAt) ? r.deletedAt : null,
   }
+}
+
+function toTiming(raw: unknown): Message['timing'] {
+  const r = raw as Record<string, unknown> | null
+  if (!r || !isNumber(r.firstTokenMs) || !isNumber(r.totalMs)) return null
+  return { firstTokenMs: r.firstTokenMs, totalMs: r.totalMs }
 }
 
 function toAttachment(raw: unknown): Attachment | null {
@@ -434,6 +445,11 @@ function toMessage(raw: unknown): Message | null {
     status,
     error: status === 'error' ? (isString(r.error) ? r.error : 'Unknown error') : null,
     usage: (r.usage as Message['usage']) ?? null,
+    sources: (Array.isArray(r.sources) ? (r.sources as { url?: unknown; title?: unknown }[]) : []).flatMap(
+      (x) => toSource(x?.url, x?.title) ?? [],
+    ),
+    webSearch: r.webSearch === true,
+    timing: toTiming(r.timing),
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     deletedAt: isNumber(r.deletedAt) ? r.deletedAt : null,

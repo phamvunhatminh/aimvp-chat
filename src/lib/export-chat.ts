@@ -15,6 +15,9 @@ export function conversationToMarkdown(conversation: Conversation, messages: Mes
     const files = m.attachments ?? []
     if (files.length) lines.push(files.map((a) => `📎 ${a.name}`).join('  \n'), '')
     if (m.content) lines.push(m.content)
+    if (m.sources?.length) {
+      lines.push('', 'Sources:', ...m.sources.map((s, i) => `${i + 1}. [${s.title.replace(/[[\]]/g, '')}](${s.url})`))
+    }
   }
   return `${lines.join('\n').trim()}\n`
 }

@@ -9,11 +9,13 @@ import type { PreparedFile } from './files'
 import {
   documentAsText,
   loadProvider,
+  makesImages,
   parseModelRef,
   ProviderError,
   PROVIDERS,
   type ChatMessage,
   type ContentPart,
+  type Source,
   type Usage,
 } from './providers'
 import { newId } from './utils'
@@ -151,6 +153,10 @@ async function runCompletion(conversationId: string): Promise<void> {
   const providerName = PROVIDERS[provider].name
   const apiKey = useSettings.getState().apiKeys[provider]
 
+  const modelInfo = findModel(provider, model)
+  // Image models don't search; neither do models their provider says can't.
+  const webSearch = !!conversation.webSearch && !makesImages(modelInfo) && modelInfo?.webSearch !== false
+
   const controller = new AbortController()
   useStreams.setState((s) => ({ controllers: { ...s.controllers, [conversationId]: controller } }))
 
@@ -160,12 +166,20 @@ async function runCompletion(conversationId: string): Promise<void> {
     content: '',
     model: conversation.model,
     status: 'streaming',
+    webSearch,
   })
 
   let content = ''
   let reasoning = ''
   let usage: Usage | null = null
   const images: Attachment[] = []
+  const sources: Source[] = []
+  const startedAt = performance.now()
+  let firstTokenAt: number | null = null
+  const timing = () => {
+    const end = performance.now()
+    return { firstTokenMs: Math.round((firstTokenAt ?? end) - startedAt), totalMs: Math.round(end - startedAt) }
+  }
   let flushTimer: ReturnType<typeof setTimeout> | null = null
   let lastPersist = Date.now()
 
@@ -183,7 +197,8 @@ async function runCompletion(conversationId: string): Promise<void> {
     const stream = client.streamChat({
       apiKey,
       model,
-      modelInfo: findModel(provider, model),
+      modelInfo,
+      webSearch,
       messages: await buildPrompt(
         [project?.instructions ?? '', projectFilesPrompt(project?.files ?? []), conversation.systemPrompt],
         history,
@@ -191,10 +206,18 @@ async function runCompletion(conversationId: string): Promise<void> {
       signal: controller.signal,
     })
     for await (const event of stream) {
+      if (firstTokenAt === null && event.type !== 'usage' && event.type !== 'sources') firstTokenAt = performance.now()
       if (event.type === 'content') content += event.text
       else if (event.type === 'reasoning') reasoning += event.text
       else if (event.type === 'usage') usage = event.usage
-      else {
+      else if (event.type === 'sources') {
+        const fresh = event.sources.filter((s, i, all) => all.findIndex((x) => x.url === s.url) === i)
+        const added = fresh.filter((s) => !sources.some((x) => x.url === s.url))
+        if (added.length) {
+          sources.push(...added)
+          await updateMessage(reply.id, { sources: [...sources] })
+        }
+      } else {
         // Generated images are saved right away and shown as soon as they arrive.
         const bytes = base64ToBytes(event.data)
         const ext = event.mimeType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'png'
@@ -217,12 +240,14 @@ async function runCompletion(conversationId: string): Promise<void> {
       }
     }
     flushDraft()
-    await updateMessage(reply.id, { content, reasoning, usage, status: 'done' })
+    await updateMessage(reply.id, { content, reasoning, usage, timing: timing(), status: 'done' })
   } catch (err) {
     flushDraft()
     if (controller.signal.aborted) {
       // Stopped by the user: keep whatever arrived, drop the reply if nothing did.
-      if (content || reasoning || images.length) await updateMessage(reply.id, { content, reasoning, usage, status: 'done' })
+      if (content || reasoning || images.length) {
+        await updateMessage(reply.id, { content, reasoning, usage, timing: timing(), status: 'done' })
+      }
       else await deleteMessages(conversationId, (m) => m.id === reply.id)
     } else {
       await updateMessage(reply.id, { content, reasoning, status: 'error', error: errorMessage(err, providerName) })

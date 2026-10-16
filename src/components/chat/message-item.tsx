@@ -2,6 +2,7 @@ import {
   AlertCircleIcon,
   BookmarkPlusIcon,
   BrainIcon,
+  GlobeIcon,
   Loader2Icon,
   PencilIcon,
   RefreshCwIcon,
@@ -15,7 +16,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { editAndResend, regenerate } from '@/lib/chat'
 import type { Message } from '@/lib/db'
 import { formatCost } from '@/lib/format'
-import { parseModelRef, PROVIDERS } from '@/lib/providers'
+import { parseModelRef, PROVIDERS, type Source } from '@/lib/providers'
 import { readAloud, stopReading, useCanReadAloud, useReadAloud } from '@/lib/read-aloud'
 import { deriveTitle } from '@/lib/repo'
 import { useStreams } from '@/stores/streams'
@@ -145,9 +146,16 @@ function AssistantMessage({ message, isLast, busy }: { message: Message; isLast:
         <Suspense fallback={<div className="markdown whitespace-pre-wrap">{content}</div>}>
           <Markdown content={content} />
         </Suspense>
+      ) : streaming && message.webSearch && !reasoning ? (
+        <div className="flex h-7 items-center gap-2 text-sm text-muted-foreground" role="status">
+          <GlobeIcon className="size-4 animate-pulse" />
+          {message.sources?.length ? `Reading ${message.sources.length} sources…` : 'Searching the web…'}
+        </div>
       ) : streaming && !reasoning && !message.attachments?.length ? (
         <TypingIndicator />
       ) : null}
+
+      {!streaming && !!message.sources?.length && <Sources sources={message.sources} />}
 
       {message.status === 'error' && (
         <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -186,6 +194,49 @@ function AssistantMessage({ message, isLast, busy }: { message: Message; isLast:
         </div>
       )}
     </div>
+  )
+}
+
+const SHOWN_SOURCES = 4
+
+/** The web pages a reply drew on, as links. */
+function Sources({ sources }: { sources: Source[] }) {
+  const [expanded, setExpanded] = useState(false)
+  const shown = expanded ? sources : sources.slice(0, SHOWN_SOURCES)
+  return (
+    <ol className="mt-1 flex flex-wrap gap-1.5 text-xs" aria-label="Sources">
+      {shown.map((s, i) => {
+        const host = new URL(s.url).hostname.replace(/^www\./, '')
+        return (
+          <li key={s.url} className="min-w-0">
+            <a
+              href={s.url}
+              target="_blank"
+              rel="noopener noreferrer nofollow"
+              title={s.url}
+              className="flex max-w-64 items-center gap-1.5 rounded-full border px-2.5 py-1 hover:bg-accent"
+            >
+              <span className="text-muted-foreground tabular-nums">{i + 1}</span>
+              <span className="truncate">{s.title}</span>
+              {!s.title.includes(host) && !host.endsWith('vertexaisearch.cloud.google.com') && (
+                <span className="shrink-0 text-muted-foreground">{host}</span>
+              )}
+            </a>
+          </li>
+        )
+      })}
+      {sources.length > SHOWN_SOURCES && !expanded && (
+        <li>
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            className="rounded-full border px-2.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            +{sources.length - SHOWN_SOURCES} more
+          </button>
+        </li>
+      )}
+    </ol>
   )
 }
 

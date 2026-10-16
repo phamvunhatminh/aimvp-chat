@@ -245,6 +245,36 @@ describe('generated images', () => {
   })
 })
 
+describe('web search', () => {
+  it('asks for search when the chat has it on, and keeps each source once', async () => {
+    const cite = (url: string) => ({ type: 'url_citation', url_citation: { url, title: url.slice(8) } })
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        dataEvent({ choices: [{ delta: { content: 'News', annotations: [cite('https://a.example'), cite('https://a.example')] } }] }),
+        dataEvent({ choices: [{ delta: { content: '!', annotations: [cite('https://b.example'), cite('https://a.example')] } }] }),
+        'data: [DONE]\n\n',
+      ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const c = await createConversation({ model: 'openrouter:a/b', systemPrompt: '', webSearch: true })
+    await sendMessage(c.id, 'Any news?')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).tools).toEqual([{ type: 'openrouter:web_search' }])
+    const [, reply] = await getMessages(c.id)
+    expect(reply).toMatchObject({ content: 'News!', webSearch: true })
+    expect(reply.sources?.map((s) => s.url)).toEqual(['https://a.example', 'https://b.example'])
+    expect(reply.timing?.totalMs).toBeGreaterThanOrEqual(reply.timing?.firstTokenMs ?? Infinity)
+  })
+
+  it('leaves search off by default', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(reply('ok'))
+    vi.stubGlobal('fetch', fetchMock)
+    const c = await createConversation({ model: 'openrouter:a/b', systemPrompt: '' })
+    await sendMessage(c.id, 'hi')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).tools).toBeUndefined()
+    expect((await getMessages(c.id))[1].webSearch).toBe(false)
+  })
+})
+
 describe('regenerate and edit', () => {
   it('regenerate replaces the last reply', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(reply('first')).mockResolvedValueOnce(reply('second')))

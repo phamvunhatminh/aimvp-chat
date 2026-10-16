@@ -1,6 +1,14 @@
 import { readSSE } from '@/lib/sse'
 import { httpError, ProviderError, readErrorBody, type ApiErrorBody } from './errors'
-import { makesImages, textOf, type ChatMessage, type ModelInfo, type ProviderClient, type StreamEvent } from './types'
+import {
+  makesImages,
+  textOf,
+  toSource,
+  type ChatMessage,
+  type ModelInfo,
+  type ProviderClient,
+  type StreamEvent,
+} from './types'
 
 const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta'
 
@@ -23,6 +31,8 @@ interface GeminiChunk {
   candidates?: {
     content?: { parts?: { text?: string; thought?: boolean; inlineData?: { mimeType?: string; data?: string } }[] }
     finishReason?: string
+    /** Pages Google Search found, when grounding is on. */
+    groundingMetadata?: { groundingChunks?: { web?: { uri?: string; title?: string } }[] }
   }[]
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number }
 }
@@ -104,19 +114,19 @@ export const google: ProviderClient = {
     await geminiFetch('/models?pageSize=1', apiKey, { signal })
   },
 
-  async *streamChat({ apiKey, model, modelInfo, messages, signal }): AsyncGenerator<StreamEvent> {
+  async *streamChat({ apiKey, model, modelInfo, messages, webSearch, signal }): AsyncGenerator<StreamEvent> {
     const system = messages
       .filter((m) => m.role === 'system')
       .map((m) => textOf(m.content))
       .join('\n\n')
+    const makesImage = makesImages(modelInfo) || IMAGE_MODEL.test(model)
     const res = await geminiFetch(`/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, apiKey, {
       method: 'POST',
       body: JSON.stringify({
         contents: toGeminiContents(messages),
         ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
-        ...(makesImages(modelInfo) || IMAGE_MODEL.test(model)
-          ? { generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } }
-          : {}),
+        ...(makesImage ? { generationConfig: { responseModalities: ['TEXT', 'IMAGE'] } } : {}),
+        ...(webSearch && !makesImage ? { tools: [{ google_search: {} }] } : {}),
       }),
       signal,
     })
@@ -152,6 +162,11 @@ export const google: ProviderClient = {
           yield { type: 'content', text: part.text }
         }
       }
+      // Titles are the sites' domains; the links go through Google's redirector.
+      const sources = (candidate?.groundingMetadata?.groundingChunks ?? []).flatMap(
+        (c) => toSource(c.web?.uri, c.web?.title) ?? [],
+      )
+      if (sources.length) yield { type: 'sources', sources }
       if (chunk.usageMetadata) usage = chunk.usageMetadata
       if (candidate?.finishReason && BLOCKED_FINISH.has(candidate.finishReason) && !wroteText) {
         throw new ProviderError(`Gemini stopped the reply (${candidate.finishReason}).`, null, 'google')
