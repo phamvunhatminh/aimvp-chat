@@ -2,8 +2,6 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "aimvp-chat",
   "compatibility_date": "2026-10-01",
-  // `wrangler deploy` builds first, so CI/CD works even with an empty build command.
-  "build": { "command": "npm run build" },
   // Static SPA: no Worker script yet. Unknown paths fall back to index.html.
   "assets": {
     "directory": "./dist",
