@@ -38,7 +38,8 @@ export function ModelPicker({
   /** Model reference, `provider:model-id`. */
   value: string
   onChange: (ref: string) => void
-  variant?: 'ghost' | 'outline'
+  /** `composer`: a small pill in the message box's toolbar that opens upward. */
+  variant?: 'ghost' | 'outline' | 'composer'
   className?: string
 }) {
   const [open, setOpen] = useState(false)
@@ -73,19 +74,31 @@ export function ModelPicker({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
-          variant={variant}
-          className={cn('min-w-0 justify-between gap-1 px-2.5', variant === 'ghost' && 'text-base font-semibold', className)}
+          variant={variant === 'composer' ? 'ghost' : variant}
+          title={variant === 'composer' ? `Model: ${currentName}` : undefined}
+          className={cn(
+            'min-w-0 justify-between gap-1 px-2.5',
+            variant === 'ghost' && 'text-base font-semibold',
+            variant === 'composer' &&
+              'h-8 gap-1 rounded-full px-2.5 text-[13px] font-medium text-muted-foreground hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground',
+            className,
+          )}
         >
           <span className="truncate">{currentName}</span>
-          {showProvider && (
+          {showProvider && variant !== 'composer' && (
             <span className="hidden shrink-0 text-xs font-normal text-muted-foreground sm:inline">
               {PROVIDERS[parseModelRef(value).provider].name}
             </span>
           )}
-          <ChevronDownIcon className="text-muted-foreground" />
+          <ChevronDownIcon className={cn('text-muted-foreground', variant === 'composer' && 'size-3.5')} />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[min(28rem,calc(100vw-1rem))] p-0">
+      <PopoverContent
+        side={variant === 'composer' ? 'top' : 'bottom'}
+        align={variant === 'composer' ? 'end' : 'start'}
+        sideOffset={8}
+        className="w-[min(28rem,calc(100vw-1rem))] overflow-hidden rounded-xl p-0"
+      >
         <Command
           loop
           className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"

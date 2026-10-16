@@ -3,19 +3,35 @@ import { PromptLibraryDialog } from '@/components/prompt-library-dialog'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { Sidebar } from '@/components/sidebar'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
+import { cn } from '@/lib/utils'
+import { useSettings } from '@/stores/settings'
 import { useUI } from '@/stores/ui'
 
 export function AppLayout() {
   const sidebarOpen = useUI((s) => s.sidebarOpen)
   const setSidebarOpen = useUI((s) => s.setSidebarOpen)
+  const collapsed = useSettings((s) => s.sidebarCollapsed)
 
   return (
     <div className="flex h-dvh overflow-hidden print:block print:h-auto print:overflow-visible">
-      <aside className="hidden w-64 shrink-0 border-r bg-sidebar md:block print:hidden">
-        <Sidebar />
+      <aside
+        className={cn(
+          // Visibility flips after the width animation, so hidden links leave the tab order and the a11y tree.
+          'hidden shrink-0 overflow-hidden bg-sidebar transition-[width,visibility] duration-200 ease-out md:block print:hidden',
+          collapsed ? 'invisible w-0' : 'w-64 border-r',
+        )}
+      >
+        <div className="h-full w-64">
+          <Sidebar />
+        </div>
       </aside>
       <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-        <SheetContent aria-describedby={undefined} className="md:hidden">
+        {/* No autofocus: on phones it would pop up the keyboard for the search box. */}
+        <SheetContent
+          aria-describedby={undefined}
+          className="md:hidden"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
           <SheetTitle className="sr-only">Chats</SheetTitle>
           <Sidebar onNavigate={() => setSidebarOpen(false)} />
         </SheetContent>

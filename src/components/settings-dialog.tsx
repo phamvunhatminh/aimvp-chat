@@ -1,13 +1,19 @@
 import {
+  ChartColumnIcon,
+  DatabaseIcon,
   DownloadIcon,
   ExternalLinkIcon,
   KeyRoundIcon,
+  MicIcon,
   MonitorIcon,
   MoonIcon,
+  SlidersHorizontalIcon,
   SunIcon,
   TrashIcon,
   UploadIcon,
+  type LucideIcon,
 } from 'lucide-react'
+import { Tabs } from 'radix-ui'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
@@ -37,29 +43,73 @@ import { deleteAllData, exportData, importData } from '@/lib/repo'
 import { browserRecognition, canSpeakInBrowser, OPENAI_VOICES, resolveEngine, SPEECH_LANGUAGES } from '@/lib/speech'
 import { cn } from '@/lib/utils'
 import { usePrompts } from '@/hooks/use-data'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { useSettings, type SpeechEngine, type Theme } from '@/stores/settings'
 import { useStreams } from '@/stores/streams'
-import { useUI } from '@/stores/ui'
+import { useUI, type SettingsTab } from '@/stores/ui'
+
+const TABS: { value: SettingsTab; label: string; icon: LucideIcon }[] = [
+  { value: 'general', label: 'General', icon: SlidersHorizontalIcon },
+  { value: 'keys', label: 'API keys', icon: KeyRoundIcon },
+  { value: 'voice', label: 'Voice', icon: MicIcon },
+  { value: 'usage', label: 'Usage', icon: ChartColumnIcon },
+  { value: 'data', label: 'Your data', icon: DatabaseIcon },
+]
 
 export function SettingsDialog() {
   const open = useUI((s) => s.settingsOpen)
   const setOpen = useUI((s) => s.setSettingsOpen)
+  const tab = useUI((s) => s.settingsTab)
+  const setTab = useUI((s) => s.setSettingsTab)
+  const wide = useMediaQuery('(min-width: 768px)')
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="max-w-xl gap-0 p-0">
-        <DialogHeader className="border-b p-6 pb-4">
+      <DialogContent className="flex h-[min(44rem,calc(100dvh-2rem))] max-w-3xl flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 border-b px-5 py-4 text-left sm:px-6">
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>Everything here is saved in this browser only.</DialogDescription>
         </DialogHeader>
-        <div className="divide-y">
-          <ApiKeysSection />
-          <DefaultsSection />
-          <VoiceSection />
-          <UsageSection />
-          <AppearanceSection />
-          <DataSection />
-        </div>
+        <Tabs.Root
+          value={tab}
+          onValueChange={(value) => setTab(value as SettingsTab)}
+          orientation={wide ? 'vertical' : 'horizontal'}
+          className="flex min-h-0 flex-1 flex-col md:flex-row"
+        >
+          <Tabs.List
+            aria-label="Settings sections"
+            className="flex shrink-0 gap-1 overflow-x-auto border-b px-3 py-2 md:w-48 md:flex-col md:overflow-visible md:border-r md:border-b-0 md:p-3"
+          >
+            {TABS.map(({ value, label, icon: Icon }) => (
+              <Tabs.Trigger
+                key={value}
+                value={value}
+                className="flex shrink-0 items-center gap-2.5 rounded-lg px-3 py-2 text-sm whitespace-nowrap text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=active]:bg-accent data-[state=active]:font-medium data-[state=active]:text-foreground"
+              >
+                <Icon className="size-4" />
+                {label}
+              </Tabs.Trigger>
+            ))}
+          </Tabs.List>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <Tabs.Content value="general" className="divide-y outline-none">
+              <DefaultsSection />
+              <AppearanceSection />
+            </Tabs.Content>
+            <Tabs.Content value="keys" className="outline-none">
+              <ApiKeysSection />
+            </Tabs.Content>
+            <Tabs.Content value="voice" className="outline-none">
+              <VoiceSection />
+            </Tabs.Content>
+            <Tabs.Content value="usage" className="outline-none">
+              <UsageSection />
+            </Tabs.Content>
+            <Tabs.Content value="data" className="outline-none">
+              <DataSection />
+            </Tabs.Content>
+          </div>
+        </Tabs.Root>
       </DialogContent>
     </Dialog>
   )
@@ -67,10 +117,10 @@ export function SettingsDialog() {
 
 function Section({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
-    <section className="grid gap-3 p-6">
+    <section className="grid gap-4 p-5 sm:p-6">
       <div>
-        <h3 className="font-medium">{title}</h3>
-        {description && <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>}
+        <h3 className="font-semibold">{title}</h3>
+        {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
       </div>
       {children}
     </section>
@@ -457,7 +507,7 @@ function DataSection() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `aimvp-export-${new Date().toISOString().slice(0, 10)}.json`
+    a.download = `chats-export-${new Date().toISOString().slice(0, 10)}.json`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -485,7 +535,7 @@ function DataSection() {
       title="Your data"
       description={
         persisted === false
-          ? 'Chats live in this browser. Export a backup now and then; installing aimvp as an app helps keep them safe.'
+          ? 'Chats live in this browser. Export a backup now and then; installing this site as an app helps keep them safe.'
           : 'Chats live in this browser. Export a backup to move them to another device.'
       }
     >

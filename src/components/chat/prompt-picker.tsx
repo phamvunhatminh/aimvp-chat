@@ -119,7 +119,7 @@ export function PromptButton({
       type="button"
       variant="ghost"
       size="icon"
-      className="rounded-full text-muted-foreground"
+      className="rounded-full text-muted-foreground hover:text-foreground"
       onClick={picker.toggleBrowsing}
       aria-label="Saved prompts"
       aria-expanded={picker.browsing}

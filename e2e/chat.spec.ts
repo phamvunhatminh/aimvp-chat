@@ -1,4 +1,4 @@
-import { ANSWER, composer, DIRECT_ANSWER, expect, OAUTH_KEY, openWithKey, test } from './fixtures'
+import { ANSWER, composer, DIRECT_ANSWER, expect, messages, OAUTH_KEY, openWithKey, test } from './fixtures'
 
 test('first run: paste an API key', async ({ page }) => {
   await page.goto('/')
@@ -42,8 +42,8 @@ test('send a message with a chosen model and system prompt', async ({ page, open
   await expect(page).toHaveURL(/\/c\/[\w-]+$/)
   await expect(page.locator('.markdown pre')).toContainText('const greet')
   await expect(page.locator('.markdown strong')).toHaveText('bold')
-  await expect(page.getByText('anthropic/claude-test · OpenRouter · 42 tokens · $0.0004')).toBeVisible()
-  await expect(page).toHaveTitle('How do I greet someone? · aimvp')
+  await expect(page.getByText('Anthropic: Claude Test · OpenRouter · 42 tokens · $0.0004')).toBeVisible()
+  await expect(page).toHaveTitle('How do I greet someone?')
 
   // Untrusted output: raw HTML is shown as text and remote images become links.
   await expect(page.locator('.markdown script')).toHaveCount(0)
@@ -88,7 +88,7 @@ const DIRECT = [
     name: 'Anthropic',
     key: 'sk-ant-api03-0123456789',
     model: 'Claude Opus 5.5',
-    label: 'claude-opus-5-5',
+    label: 'Claude Opus 5.5',
     tokens: 15,
   },
   {
@@ -96,7 +96,7 @@ const DIRECT = [
     name: 'Google Gemini',
     key: 'AIzaSy-0123456789',
     model: 'Gemini 2.5 Flash',
-    label: 'gemini-2.5-flash',
+    label: 'Gemini 2.5 Flash',
     tokens: 9,
   },
 ] as const
@@ -111,6 +111,7 @@ for (const p of DIRECT) {
 
     if (test.info().project.name === 'mobile') await page.getByRole('button', { name: 'Open sidebar' }).click()
     await page.getByRole('button', { name: 'Settings' }).click()
+    await page.getByRole('tab', { name: 'API keys' }).click()
     await page.getByLabel(`${p.name} API key`).fill(p.key)
     await page.getByLabel(`${p.name} API key`).press('Enter')
     await expect(page.getByText(`${p.name} key saved`)).toBeVisible()
@@ -154,7 +155,7 @@ test('history persists and can be renamed and deleted', async ({ page }) => {
   await expect(page.locator('.markdown pre')).toBeVisible()
 
   await page.reload()
-  await expect(page.getByRole('main').getByText('Remember me', { exact: true }).filter({ visible: true })).toBeVisible()
+  await expect(messages(page).getByText('Remember me', { exact: true })).toBeVisible()
   await expect(page.locator('.markdown pre')).toBeVisible()
 
   if (test.info().project.name === 'mobile') await page.getByRole('button', { name: 'Open sidebar' }).click()
@@ -178,11 +179,11 @@ test('edit a sent message and get a new answer', async ({ page, openrouter }) =>
   await page.getByRole('button', { name: 'Send message' }).click()
   await expect(page.locator('.markdown pre')).toBeVisible()
 
-  await page.getByRole('main').getByText('Original question', { exact: true }).filter({ visible: true }).hover()
+  await messages(page).getByText('Original question', { exact: true }).hover()
   await page.getByRole('button', { name: 'Edit message' }).click()
   await page.getByLabel('Edit message').fill('Edited question')
   await page.getByRole('button', { name: 'Send', exact: true }).click()
-  await expect(page.getByRole('main').getByText('Edited question', { exact: true }).filter({ visible: true })).toBeVisible()
+  await expect(messages(page).getByText('Edited question', { exact: true })).toBeVisible()
   await expect.poll(() => openrouter.chatRequests.length).toBe(2)
   expect(openrouter.chatRequests[1].messages).toEqual([{ role: 'user', content: 'Edited question' }])
   await expect(page.locator('.markdown pre')).toHaveCount(1)

@@ -462,7 +462,7 @@ export async function importData(
 ): Promise<{ projects: number; conversations: number; messages: number; prompts: number }> {
   const f = file as Partial<ExportFile>
   if (!f || f.app !== 'aimvp' || f.version !== 1 || !Array.isArray(f.conversations) || !Array.isArray(f.messages)) {
-    throw new Error('This file is not an aimvp export.')
+    throw new Error("This file isn't a chat export.")
   }
   const projects = (Array.isArray(f.projects) ? f.projects : []).map(toProject).filter((p) => p !== null)
   const conversations = f.conversations.map(toConversation).filter((c) => c !== null)

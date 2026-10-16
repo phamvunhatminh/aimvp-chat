@@ -20,7 +20,7 @@ describe('conversationToMarkdown', () => {
       [
         '# Trip plan',
         '',
-        '_gpt-5 · OpenAI · exported 2026-10-16 from aimvp_',
+        '_gpt-5 · OpenAI · exported 2026-10-16_',
         '',
         '## You',
         '',

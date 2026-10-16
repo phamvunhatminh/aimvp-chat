@@ -45,6 +45,7 @@ test('a budget shows progress, and the sidebar widget can be hidden', async ({ p
   await openSidebar(page)
   await page.getByRole('button', { name: 'Settings' }).click()
   const settings = page.getByRole('dialog', { name: 'Settings' })
+  await settings.getByRole('tab', { name: 'Usage' }).click()
   await settings.getByLabel('Monthly budget').fill('10')
   await settings.getByLabel('Monthly budget').press('Enter')
   await page.keyboard.press('Escape')

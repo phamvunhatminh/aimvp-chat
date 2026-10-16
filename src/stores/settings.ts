@@ -27,6 +27,8 @@ interface SettingsState {
   showUsageInSidebar: boolean
   /** USD a month, to compare spend against; null for none. */
   monthlyBudget: number | null
+  /** The sidebar is hidden on wide screens. */
+  sidebarCollapsed: boolean
   setApiKey: (provider: ProviderId, apiKey: string | null) => void
   setDefaultModel: (model: string) => void
   setDefaultSystemPrompt: (prompt: string) => void
@@ -34,6 +36,7 @@ interface SettingsState {
   setTheme: (theme: Theme) => void
   setSpeech: (speech: Partial<Pick<SettingsState, 'speechInput' | 'speechOutput' | 'speechVoice' | 'speechLanguage'>>) => void
   setUsagePrefs: (prefs: Partial<Pick<SettingsState, 'showUsageInSidebar' | 'monthlyBudget'>>) => void
+  setSidebarCollapsed: (collapsed: boolean) => void
 }
 
 type PersistedSettings = Pick<
@@ -49,6 +52,7 @@ type PersistedSettings = Pick<
   | 'speechLanguage'
   | 'showUsageInSidebar'
   | 'monthlyBudget'
+  | 'sidebarCollapsed'
 >
 
 /** Providers the user has a key for, in display order. */
@@ -86,6 +90,7 @@ export const useSettings = create<SettingsState>()(
       speechLanguage: '',
       showUsageInSidebar: true,
       monthlyBudget: null,
+      sidebarCollapsed: false,
       setApiKey: (provider, apiKey) =>
         set((s) => {
           const apiKeys = { ...s.apiKeys }
@@ -104,6 +109,7 @@ export const useSettings = create<SettingsState>()(
       setTheme: (theme) => set({ theme }),
       setSpeech: (speech) => set(speech),
       setUsagePrefs: (prefs) => set(prefs),
+      setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
     }),
     {
       // public/theme-init.js reads `state.theme` from this key before first paint.
@@ -122,6 +128,7 @@ export const useSettings = create<SettingsState>()(
         speechLanguage: s.speechLanguage,
         showUsageInSidebar: s.showUsageInSidebar,
         monthlyBudget: s.monthlyBudget,
+        sidebarCollapsed: s.sidebarCollapsed,
       }),
     },
   ),

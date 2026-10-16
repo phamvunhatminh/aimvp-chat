@@ -5,13 +5,13 @@ import {
   ExternalLinkIcon,
   GlobeIcon,
   ImageIcon,
-  MenuIcon,
   TimerIcon,
   WalletIcon,
   type LucideIcon,
 } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
+import { SidebarToggle } from '@/components/sidebar-toggle'
 import { BarChart, Meter } from '@/components/usage/charts'
 import { costText, formatMetric, PROVIDER_COLORS, type UsageMetric } from '@/components/usage/shared'
 import { Button } from '@/components/ui/button'
@@ -23,7 +23,6 @@ import { USAGE_PERIODS, type UsagePeriod, type UsageRow, type UsageStats } from 
 import { cn } from '@/lib/utils'
 import { useModelName } from '@/stores/models'
 import { useSettings } from '@/stores/settings'
-import { useUI } from '@/stores/ui'
 
 const PERIOD_KEY = 'aimvp.usage-period'
 
@@ -41,10 +40,9 @@ export function UsagePage() {
   const [period, setPeriod] = useState<UsagePeriod>(readPeriod)
   const [metric, setMetric] = useState<UsageMetric>('cost')
   const stats = useUsage(period)
-  const setSidebarOpen = useUI((s) => s.setSidebarOpen)
 
   useEffect(() => {
-    document.title = 'Usage · aimvp'
+    document.title = 'Usage'
   }, [])
 
   function choosePeriod(next: UsagePeriod) {
@@ -62,15 +60,7 @@ export function UsagePage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-1 px-2 sm:px-3">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="md:hidden"
-          onClick={() => setSidebarOpen(true)}
-          aria-label="Open sidebar"
-        >
-          <MenuIcon />
-        </Button>
+        <SidebarToggle />
         <h1 className="px-2 text-base font-semibold">Usage</h1>
       </header>
 

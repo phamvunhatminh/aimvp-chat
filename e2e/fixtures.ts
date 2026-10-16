@@ -244,4 +244,7 @@ export async function openWithSettings(page: Page, state: Record<string, unknown
   await page.goto(path)
 }
 
+/** The chat transcript. */
+export const messages = (page: Page) => page.getByRole('region', { name: 'Messages' })
+
 export const composer = (page: Page) => page.getByLabel('Message', { exact: true })

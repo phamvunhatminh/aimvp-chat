@@ -1,11 +1,18 @@
-import { GlobeIcon, PaperclipIcon } from 'lucide-react'
+import {
+  CodeIcon,
+  GlobeIcon,
+  GraduationCapIcon,
+  LanguagesIcon,
+  LightbulbIcon,
+  PaperclipIcon,
+  PenLineIcon,
+} from 'lucide-react'
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { ChatHeader } from '@/components/chat/chat-header'
-import { Composer } from '@/components/chat/composer'
+import { Composer, type Suggestion } from '@/components/chat/composer'
 import { MessageList } from '@/components/chat/message-list'
 import { ConnectCard } from '@/components/connect-card'
-import { Logo } from '@/components/logo'
 import { ProjectOverview } from '@/components/project-overview'
 import { Button } from '@/components/ui/button'
 import { useConversation, useMessages, useProject } from '@/hooks/use-data'
@@ -53,7 +60,7 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
 
   useEffect(() => {
     const name = conversation?.title ?? (newChatProjectId ? project?.name : undefined)
-    document.title = name ? `${name} · aimvp` : 'aimvp'
+    document.title = name ?? 'New chat'
   }, [conversation, project, newChatProjectId])
 
   // Stop reading a reply aloud when leaving its chat.
@@ -85,13 +92,44 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
     void sendMessage(created.id, text, files)
   }
 
+  const changeModel = (next: string) =>
+    conversation ? void updateConversation(conversation.id, { model: next }) : setDraft({ model: next })
+  // A new chat (outside a project page) puts the message box in the middle, ChatGPT-style.
+  const isNewChat = !hasMessages && !(project && newChatProjectId)
+
+  const composer = (variant: 'docked' | 'hero') => (
+    <Composer
+      variant={variant}
+      suggestions={variant === 'hero' && !modelInfo?.outputs?.image ? SUGGESTIONS : undefined}
+      onSend={(text, files) => void handleSend(text, files)}
+      onStop={() => id && stopStreaming(id)}
+      streaming={streaming}
+      modelRef={model}
+      onModelChange={changeModel}
+      tools={
+        canSearch && (
+          <WebSearchToggle
+            on={webSearch}
+            onChange={(next) =>
+              conversation ? void updateConversation(conversation.id, { webSearch: next }) : setDraft({ webSearch: next })
+            }
+          />
+        )
+      }
+      placeholder={
+        modelInfo?.outputs?.image
+          ? 'Describe the image you want…'
+          : project && newChatProjectId
+            ? `New chat in ${project.name}…`
+            : undefined
+      }
+    />
+  )
+
   return (
     <FileDropZone enabled={hasAnyKey}>
       <ChatHeader
-        model={model}
-        onModelChange={(next) =>
-          conversation ? void updateConversation(conversation.id, { model: next }) : setDraft({ model: next })
-        }
+        title={hasMessages ? conversation?.title : undefined}
         systemPrompt={systemPrompt}
         onSystemPromptChange={(next) =>
           conversation
@@ -112,7 +150,11 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
             : undefined
         }
       />
-      {conversation && <h1 className="mx-auto hidden w-full max-w-3xl px-4 pb-4 text-2xl font-semibold print:block">{conversation.title}</h1>}
+      {conversation && (
+        <h1 className="mx-auto hidden w-full max-w-3xl px-4 pb-4 text-2xl font-semibold print:block">
+          {conversation.title}
+        </h1>
+      )}
 
       {hasMessages ? (
         <MessageList messages={messages} busy={streaming} focusMessageId={searchParams.get('m')} />
@@ -120,45 +162,34 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
         <div className="min-h-0 flex-1 overflow-y-auto">
           <ProjectOverview project={project} />
         </div>
+      ) : hasAnyKey ? (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto pt-4 pb-[12dvh]">
+          <h1 className="mb-7 px-6 text-center text-[1.75rem] font-semibold tracking-tight sm:text-[2rem]">
+            What can I help with?
+          </h1>
+          {needsKey && <MissingKeyNotice modelRef={model} />}
+          {composer('hero')}
+        </div>
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto py-8">
-          {hasAnyKey ? <EmptyChat /> : <ConnectCard />}
+          <ConnectCard />
         </div>
       )}
 
-      {needsKey && <MissingKeyNotice modelRef={model} />}
-      {hasAnyKey ? (
-        <Composer
-          onSend={(text, files) => void handleSend(text, files)}
-          onStop={() => id && stopStreaming(id)}
-          streaming={streaming}
-          modelRef={model}
-          tools={
-            canSearch && (
-              <WebSearchToggle
-                on={webSearch}
-                onChange={(next) =>
-                  conversation
-                    ? void updateConversation(conversation.id, { webSearch: next })
-                    : setDraft({ webSearch: next })
-                }
-              />
-            )
-          }
-          placeholder={
-            modelInfo?.outputs?.image
-              ? 'Describe the image you want…'
-              : project && newChatProjectId
-                ? `New chat in ${project.name}…`
-                : undefined
-          }
-        />
-      ) : (
-        (hasMessages || newChatProjectId) && <ReconnectBar />
-      )}
+      {!isNewChat && needsKey && <MissingKeyNotice modelRef={model} />}
+      {!isNewChat && (hasAnyKey ? composer('docked') : (hasMessages || newChatProjectId) && <ReconnectBar />)}
     </FileDropZone>
   )
 }
+
+/** Starting points under the message box of a new chat. */
+const SUGGESTIONS: Suggestion[] = [
+  { icon: PenLineIcon, label: 'Write', text: 'Help me write ' },
+  { icon: LightbulbIcon, label: 'Brainstorm', text: 'Brainstorm ideas for ' },
+  { icon: GraduationCapIcon, label: 'Explain', text: 'Explain in simple terms: ' },
+  { icon: CodeIcon, label: 'Code', text: 'Write code that ' },
+  { icon: LanguagesIcon, label: 'Translate', text: 'Translate into English: ' },
+]
 
 /** "~$0.02 · 12k tokens", or nothing before the chat has used any. */
 function usageNote({ tokens, cost, estimated }: ReturnType<typeof chatTotals>): string | undefined {
@@ -231,18 +262,9 @@ function FileDropZone({ enabled, children }: { enabled: boolean; children: React
   )
 }
 
-function EmptyChat() {
-  return (
-    <div className="flex flex-col items-center gap-4 px-6 text-center">
-      <Logo className="size-10" />
-      <h1 className="text-2xl font-semibold tracking-tight">What can I help with?</h1>
-    </div>
-  )
-}
-
 /** The chosen model belongs to a provider the user has no key for yet. */
 function MissingKeyNotice({ modelRef }: { modelRef: string }) {
-  const setSettingsOpen = useUI((s) => s.setSettingsOpen)
+  const openSettings = useUI((s) => s.openSettings)
   const name = useModelName(modelRef)
   const provider = PROVIDERS[parseModelRef(modelRef).provider].name
   return (
@@ -250,7 +272,7 @@ function MissingKeyNotice({ modelRef }: { modelRef: string }) {
       <span className="text-muted-foreground">
         {name} runs on {provider}. Add your {provider} key, or pick another model above.
       </span>
-      <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
+      <Button variant="outline" size="sm" onClick={() => openSettings('keys')}>
         Add key
       </Button>
     </div>
@@ -258,11 +280,11 @@ function MissingKeyNotice({ modelRef }: { modelRef: string }) {
 }
 
 function ReconnectBar() {
-  const setSettingsOpen = useUI((s) => s.setSettingsOpen)
+  const openSettings = useUI((s) => s.openSettings)
   return (
     <div className="shrink-0 border-t px-4 py-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] text-center text-sm">
       <span className="text-muted-foreground">Add an API key to continue this chat.</span>{' '}
-      <Button variant="link" className="h-auto p-0" onClick={() => setSettingsOpen(true)}>
+      <Button variant="link" className="h-auto p-0" onClick={() => openSettings('keys')}>
         Open Settings
       </Button>
     </div>

@@ -254,7 +254,7 @@ async function runCompletion(conversationId: string): Promise<void> {
       if (err instanceof ProviderError && err.isAuthError) {
         toast.error(`${providerName} key needed`, {
           description: err.message,
-          action: { label: 'Settings', onClick: () => useUI.getState().setSettingsOpen(true) },
+          action: { label: 'Settings', onClick: () => useUI.getState().openSettings('keys') },
         })
       }
     }

@@ -226,8 +226,8 @@ describe('export / import', () => {
     expect((await getMessages(c.id))[0].attachments[0]).toMatchObject({ name: 'x.png', blobId })
   })
 
-  it('rejects files that are not aimvp exports', async () => {
-    await expect(importData({ foo: 1 })).rejects.toThrow(/not an aimvp export/)
+  it('rejects files that are not chat exports', async () => {
+    await expect(importData({ foo: 1 })).rejects.toThrow(/isn't a chat export/)
   })
 
   it('drops malformed records', async () => {

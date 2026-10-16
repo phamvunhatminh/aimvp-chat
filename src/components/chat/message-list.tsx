@@ -88,13 +88,17 @@ export function MessageList({
           setShowJump(distance > 240)
         }}
       >
-        <div ref={contentRef} className="mx-auto flex max-w-3xl flex-col gap-6 px-4 pt-4 pb-8">
+        <section
+          ref={contentRef}
+          aria-label="Messages"
+          className="mx-auto flex max-w-3xl flex-col gap-6 px-4 pt-4 pb-8"
+        >
           {messages.map((m, i) => (
             <div key={m.id} id={`m-${m.id}`} className="scroll-mt-4 rounded-2xl">
               <MessageItem message={m} isLast={i === messages.length - 1} conversationBusy={busy} />
             </div>
           ))}
-        </div>
+        </section>
       </div>
       {showJump && (
         <Button
