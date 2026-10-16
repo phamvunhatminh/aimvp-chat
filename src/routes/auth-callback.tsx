@@ -20,7 +20,7 @@ export function AuthCallback() {
     completeOpenRouterAuth(code).then(
       (key) => {
         if (!active) return
-        setApiKey(key)
+        setApiKey('openrouter', key)
         toast.success('OpenRouter connected')
         navigate('/', { replace: true })
       },

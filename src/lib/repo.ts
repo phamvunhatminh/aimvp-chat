@@ -1,5 +1,6 @@
 import Dexie from 'dexie'
 import { db, type Conversation, type Message } from './db'
+import { normalizeModelRef } from './providers'
 import { newId } from './utils'
 
 export const NEW_CHAT_TITLE = 'New chat'
@@ -171,7 +172,7 @@ function toConversation(raw: unknown): Conversation | null {
   return {
     id: r.id,
     title: r.title,
-    model: r.model,
+    model: normalizeModelRef(r.model),
     systemPrompt: isString(r.systemPrompt) ? r.systemPrompt : '',
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
@@ -191,7 +192,7 @@ function toMessage(raw: unknown): Message | null {
     role: r.role,
     content: r.content,
     reasoning: isString(r.reasoning) ? r.reasoning : '',
-    model: isString(r.model) ? r.model : null,
+    model: isString(r.model) ? normalizeModelRef(r.model) : null,
     status,
     error: status === 'error' ? (isString(r.error) ? r.error : 'Unknown error') : null,
     usage: (r.usage as Message['usage']) ?? null,

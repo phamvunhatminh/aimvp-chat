@@ -3,12 +3,31 @@ import { CheckIcon, ChevronDownIcon, SearchIcon, StarIcon } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { useModels } from '@/hooks/use-models'
-import { formatPricing, type ORModel } from '@/lib/openrouter'
+import { formatPricing } from '@/lib/format'
+import {
+  isProviderId,
+  parseModelRef,
+  PROVIDERS,
+  toModelRef,
+  type ModelInfo,
+  type ProviderId,
+} from '@/lib/providers'
 import { cn } from '@/lib/utils'
+import { useModelCatalog, useModelGroups, useModelName } from '@/stores/models'
 import { useSettings } from '@/stores/settings'
 
-type PickerModel = Pick<ORModel, 'id' | 'name' | 'pricing'>
+interface PickerItem {
+  ref: string
+  provider: ProviderId
+  model: Pick<ModelInfo, 'id' | 'name' | 'pricing'>
+}
+
+/** A typed `provider:model` or OpenRouter `vendor/model` id the list doesn't have. */
+function customRef(text: string): string | null {
+  const colon = text.indexOf(':')
+  if (colon > 0 && isProviderId(text.slice(0, colon)) && text.length > colon + 1) return text
+  return /^[\w.-]+\/[\w.:-]+$/.test(text) ? toModelRef('openrouter', text) : null
+}
 
 export function ModelPicker({
   value,
@@ -16,26 +35,36 @@ export function ModelPicker({
   variant = 'ghost',
   className,
 }: {
+  /** Model reference, `provider:model-id`. */
   value: string
-  onChange: (model: string) => void
+  onChange: (ref: string) => void
   variant?: 'ghost' | 'outline'
   className?: string
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
-  const { models, loading, error } = useModels()
+  const groups = useModelGroups()
+  const byProvider = useModelCatalog((s) => s.byProvider)
   const favorites = useSettings((s) => s.favoriteModels)
+  const currentName = useModelName(value)
+  const showProvider = groups.length > 1 || parseModelRef(value).provider !== groups[0]?.provider
 
-  const sorted = useMemo(() => [...models].sort((a, b) => a.name.localeCompare(b.name)), [models])
-  const byId = useMemo(() => new Map(models.map((m) => [m.id, m])), [models])
-  const favoriteModels: PickerModel[] = favorites.map((id) => byId.get(id) ?? { id, name: id })
-  const current = byId.get(value)
-  // Lets users pick a model id that is missing from the list (or when the list failed to load).
-  const customId = search.trim()
-  const showCustom = /^[\w.-]+\/[\w.:-]+$/.test(customId) && !byId.has(customId)
+  const known = useMemo(
+    () => new Set(groups.flatMap((g) => g.models.map((m) => toModelRef(g.provider, m.id)))),
+    [groups],
+  )
+  const favoriteItems: PickerItem[] = favorites.map((ref) => {
+    const { provider, model } = parseModelRef(ref)
+    const info = byProvider[provider]?.models.find((m) => m.id === model)
+    return { ref, provider, model: info ?? { id: model, name: model } }
+  })
+  const typed = customRef(search.trim())
+  const custom = typed && !known.has(typed) ? parseModelRef(typed) : null
+  const loading = groups.some((g) => g.loading && g.models.length === 0)
+  const errors = groups.filter((g) => g.error && g.models.length === 0)
 
-  function select(id: string) {
-    onChange(id)
+  function select(ref: string) {
+    onChange(ref)
     setOpen(false)
     setSearch('')
   }
@@ -47,7 +76,12 @@ export function ModelPicker({
           variant={variant}
           className={cn('min-w-0 justify-between gap-1 px-2.5', variant === 'ghost' && 'text-base font-semibold', className)}
         >
-          <span className="truncate">{current?.name ?? value}</span>
+          <span className="truncate">{currentName}</span>
+          {showProvider && (
+            <span className="hidden shrink-0 text-xs font-normal text-muted-foreground sm:inline">
+              {PROVIDERS[parseModelRef(value).provider].name}
+            </span>
+          )}
           <ChevronDownIcon className="text-muted-foreground" />
         </Button>
       </PopoverTrigger>
@@ -66,32 +100,54 @@ export function ModelPicker({
             />
           </div>
           <Command.List className="max-h-[min(60dvh,26rem)] overflow-y-auto overscroll-contain p-1">
-            {loading && models.length === 0 ? (
+            {loading ? (
               <Command.Loading>
                 <div className="px-2 py-6 text-center text-sm text-muted-foreground">Loading models…</div>
               </Command.Loading>
             ) : (
-              <Command.Empty className="px-2 py-6 text-center text-sm text-muted-foreground">
-                {error ?? 'No models found.'}
-              </Command.Empty>
+              <Command.Empty className="px-2 py-6 text-center text-sm text-muted-foreground">No models found.</Command.Empty>
             )}
-            {showCustom && (
+            {errors.map((g) => (
+              <p key={g.provider} className="px-2 py-1.5 text-xs text-destructive">
+                {PROVIDERS[g.provider].name}: {g.error}
+              </p>
+            ))}
+            {custom && (
               <Command.Group heading="Custom">
-                <ModelItem model={{ id: customId, name: `Use "${customId}"` }} value={value} onSelect={select} />
+                <ModelItem
+                  item={{ ref: typed!, provider: custom.provider, model: { id: custom.model, name: `Use "${custom.model}"` } }}
+                  value={value}
+                  showProvider
+                  onSelect={select}
+                />
               </Command.Group>
             )}
-            {favoriteModels.length > 0 && (
+            {favoriteItems.length > 0 && (
               <Command.Group heading="Favorites">
-                {favoriteModels.map((m) => (
-                  <ModelItem key={m.id} itemValue={`favorite ${m.id}`} model={m} value={value} onSelect={select} />
+                {favoriteItems.map((item) => (
+                  <ModelItem
+                    key={item.ref}
+                    itemValue={`favorite ${item.ref}`}
+                    item={item}
+                    value={value}
+                    showProvider
+                    onSelect={select}
+                  />
                 ))}
               </Command.Group>
             )}
-            <Command.Group heading="All models">
-              {sorted.map((m) => (
-                <ModelItem key={m.id} model={m} value={value} onSelect={select} />
-              ))}
-            </Command.Group>
+            {groups.map((g) => (
+              <Command.Group key={g.provider} heading={PROVIDERS[g.provider].name}>
+                {g.models.map((m) => (
+                  <ModelItem
+                    key={m.id}
+                    item={{ ref: toModelRef(g.provider, m.id), provider: g.provider, model: m }}
+                    value={value}
+                    onSelect={select}
+                  />
+                ))}
+              </Command.Group>
+            ))}
           </Command.List>
         </Command>
       </PopoverContent>
@@ -100,44 +156,46 @@ export function ModelPicker({
 }
 
 function ModelItem({
-  model,
+  item,
   value,
-  itemValue = model.id,
+  itemValue = item.ref,
+  showProvider = false,
   onSelect,
 }: {
-  model: PickerModel
+  item: PickerItem
   value: string
   itemValue?: string
-  onSelect: (id: string) => void
+  showProvider?: boolean
+  onSelect: (ref: string) => void
 }) {
-  const favorite = useSettings((s) => s.favoriteModels.includes(model.id))
+  const favorite = useSettings((s) => s.favoriteModels.includes(item.ref))
   const toggleFavorite = useSettings((s) => s.toggleFavoriteModel)
-  const pricing = formatPricing(model)
+  const providerName = PROVIDERS[item.provider].name
+  const details = [showProvider ? providerName : null, item.model.id !== item.model.name ? item.model.id : null, formatPricing(item.model)]
+    .filter(Boolean)
+    .join(' · ')
 
   return (
     <Command.Item
       value={itemValue}
-      keywords={[model.name, model.id]}
-      onSelect={() => onSelect(model.id)}
+      keywords={[item.model.name, item.model.id, providerName]}
+      onSelect={() => onSelect(item.ref)}
       className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-[selected=true]:bg-accent"
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="truncate">{model.name}</span>
-          {model.id === value && <CheckIcon className="size-3.5 shrink-0" />}
+          <span className="truncate">{item.model.name}</span>
+          {item.ref === value && <CheckIcon className="size-3.5 shrink-0" />}
         </div>
-        <div className="truncate text-xs text-muted-foreground">
-          {model.id}
-          {pricing && ` · ${pricing}`}
-        </div>
+        {details && <div className="truncate text-xs text-muted-foreground">{details}</div>}
       </div>
       <button
         type="button"
         onClick={(e) => {
           e.stopPropagation()
-          toggleFavorite(model.id)
+          toggleFavorite(item.ref)
         }}
-        aria-label={favorite ? `Remove ${model.name} from favorites` : `Add ${model.name} to favorites`}
+        aria-label={favorite ? `Remove ${item.model.name} from favorites` : `Add ${item.model.name} to favorites`}
         className="rounded-sm p-1 text-muted-foreground hover:text-foreground"
       >
         <StarIcon className={cn('size-4', favorite && 'fill-amber-400 text-amber-400')} />

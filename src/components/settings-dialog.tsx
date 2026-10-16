@@ -20,7 +20,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { connectOpenRouter } from '@/lib/connect'
-import { fetchKeyInfo, formatCost, OpenRouterError, type KeyInfo } from '@/lib/openrouter'
+import { formatCost } from '@/lib/format'
+import { loadProvider, PROVIDER_IDS, PROVIDERS, ProviderError, type ProviderId } from '@/lib/providers'
+import { fetchKeyInfo, type KeyInfo } from '@/lib/providers/openrouter'
 import { deleteAllData, exportData, importData } from '@/lib/repo'
 import { cn } from '@/lib/utils'
 import { useSettings, type Theme } from '@/stores/settings'
@@ -39,7 +41,7 @@ export function SettingsDialog() {
           <DialogDescription>Everything here is saved in this browser only.</DialogDescription>
         </DialogHeader>
         <div className="divide-y">
-          <AccountSection />
+          <ApiKeysSection />
           <DefaultsSection />
           <AppearanceSection />
           <DataSection />
@@ -62,105 +64,130 @@ function Section({ title, description, children }: { title: string; description?
 }
 
 function maskKey(key: string) {
-  return key.length > 12 ? `${key.slice(0, 8)}…${key.slice(-4)}` : '••••'
+  return key.length > 12 ? `${key.slice(0, 7)}…${key.slice(-4)}` : '••••'
 }
 
-function AccountSection() {
-  const apiKey = useSettings((s) => s.apiKey)
+function ApiKeysSection() {
+  return (
+    <Section
+      title="API keys"
+      description="Add a key for each provider you want to use. Requests are billed to that provider account."
+    >
+      <div className="grid gap-3">
+        {PROVIDER_IDS.map((provider) => (
+          <ProviderKey key={provider} provider={provider} />
+        ))}
+      </div>
+    </Section>
+  )
+}
+
+function ProviderKey({ provider }: { provider: ProviderId }) {
+  const apiKey = useSettings((s) => s.apiKeys[provider])
   const setApiKey = useSettings((s) => s.setApiKey)
-  const [keyInfo, setKeyInfo] = useState<{ key: string; info: KeyInfo } | null>(null)
-  const info = keyInfo && keyInfo.key === apiKey ? keyInfo.info : null
   const [pasted, setPasted] = useState('')
   const [checking, setChecking] = useState(false)
+  const { name, keyPlaceholder, keysUrl } = PROVIDERS[provider]
 
-  useEffect(() => {
-    if (!apiKey) return
-    const controller = new AbortController()
-    fetchKeyInfo(apiKey, controller.signal).then((info) => setKeyInfo({ key: apiKey, info }), () => {})
-    return () => controller.abort()
-  }, [apiKey])
-
-  async function savePastedKey() {
+  async function save() {
     const key = pasted.trim()
     if (!key) return
     setChecking(true)
     try {
-      await fetchKeyInfo(key)
+      await (await loadProvider(provider)).validateKey(key)
     } catch (err) {
-      // Only reject keys OpenRouter says are bad; a network hiccup shouldn't block saving.
-      if (err instanceof OpenRouterError && err.status !== null && err.status < 500) {
-        toast.error('That key was rejected by OpenRouter.')
+      // Only reject keys the provider says are bad; a network hiccup shouldn't block saving.
+      if (err instanceof ProviderError && err.status !== null && err.status < 500 && err.status !== 429) {
+        toast.error(`That key was rejected by ${name}.`, { description: err.message })
         setChecking(false)
         return
       }
     }
     setChecking(false)
-    setApiKey(key)
+    setApiKey(provider, key)
     setPasted('')
-    toast.success('OpenRouter key saved')
-  }
-
-  if (apiKey) {
-    return (
-      <Section title="OpenRouter" description="Requests are billed to your OpenRouter account.">
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
-          <div className="min-w-0 text-sm">
-            <div className="flex items-center gap-2 font-medium">
-              <span className="size-2 rounded-full bg-emerald-500" />
-              Connected
-              <code className="truncate font-mono text-xs font-normal text-muted-foreground">{maskKey(apiKey)}</code>
-            </div>
-            {info && (
-              <p className="mt-1 text-muted-foreground">
-                Used {formatCost(info.usage)}
-                {info.limit !== null ? ` of ${formatCost(info.limit)} limit` : ''}
-              </p>
-            )}
-          </div>
-          <Button variant="outline" size="sm" onClick={() => setApiKey(null)}>
-            Disconnect
-          </Button>
-        </div>
-        <a
-          href="https://openrouter.ai/settings/keys"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground underline-offset-4 hover:underline"
-        >
-          Manage limits or revoke keys on OpenRouter
-          <ExternalLinkIcon className="size-3.5" />
-        </a>
-      </Section>
-    )
+    toast.success(`${name} key saved`)
   }
 
   return (
-    <Section title="OpenRouter" description="Connect your account, or paste a key from openrouter.ai/settings/keys.">
-      <Button className="justify-self-start" onClick={() => void connectOpenRouter()}>
-        <KeyRoundIcon />
-        Connect OpenRouter
-      </Button>
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault()
-          void savePastedKey()
-        }}
-      >
-        <Input
-          type="password"
-          value={pasted}
-          onChange={(e) => setPasted(e.target.value)}
-          placeholder="sk-or-v1-…"
-          autoComplete="off"
-          spellCheck={false}
-          aria-label="OpenRouter API key"
-        />
-        <Button type="submit" variant="secondary" disabled={!pasted.trim() || checking}>
-          {checking ? 'Checking…' : 'Save'}
-        </Button>
-      </form>
-    </Section>
+    <div className="grid gap-2 rounded-lg border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+          <span className={cn('size-2 shrink-0 rounded-full', apiKey ? 'bg-emerald-500' : 'bg-muted-foreground/30')} />
+          {name}
+          {apiKey && (
+            <code className="truncate font-mono text-xs font-normal text-muted-foreground">{maskKey(apiKey)}</code>
+          )}
+        </div>
+        {apiKey ? (
+          <Button variant="outline" size="sm" onClick={() => setApiKey(provider, null)}>
+            Remove
+          </Button>
+        ) : (
+          <a
+            href={keysUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-4 hover:underline"
+          >
+            Get a key
+            <ExternalLinkIcon className="size-3" />
+          </a>
+        )}
+      </div>
+
+      {provider === 'openrouter' && apiKey && <OpenRouterCredits apiKey={apiKey} />}
+
+      {!apiKey && (
+        <>
+          {provider === 'openrouter' && (
+            <Button size="sm" className="justify-self-start" onClick={() => void connectOpenRouter()}>
+              <KeyRoundIcon />
+              Connect OpenRouter
+            </Button>
+          )}
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void save()
+            }}
+          >
+            <Input
+              type="password"
+              value={pasted}
+              onChange={(e) => setPasted(e.target.value)}
+              placeholder={keyPlaceholder}
+              autoComplete="off"
+              spellCheck={false}
+              aria-label={`${name} API key`}
+            />
+            <Button type="submit" variant="secondary" disabled={!pasted.trim() || checking}>
+              {checking ? 'Checking…' : 'Save'}
+            </Button>
+          </form>
+        </>
+      )}
+    </div>
+  )
+}
+
+function OpenRouterCredits({ apiKey }: { apiKey: string }) {
+  const [keyInfo, setKeyInfo] = useState<{ key: string; info: KeyInfo } | null>(null)
+  const info = keyInfo && keyInfo.key === apiKey ? keyInfo.info : null
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetchKeyInfo(apiKey, controller.signal).then((info) => setKeyInfo({ key: apiKey, info }), () => {})
+    return () => controller.abort()
+  }, [apiKey])
+
+  if (!info) return null
+  return (
+    <p className="text-sm text-muted-foreground">
+      Used {formatCost(info.usage)}
+      {info.limit !== null ? ` of ${formatCost(info.limit)} limit` : ''}
+    </p>
   )
 }
 

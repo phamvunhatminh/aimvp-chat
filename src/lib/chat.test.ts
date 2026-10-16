@@ -9,7 +9,7 @@ import { createConversation, getConversation, getMessages } from './repo'
 beforeEach(async () => {
   await db.conversations.clear()
   await db.messages.clear()
-  useSettings.setState({ apiKey: 'sk-test' })
+  useSettings.setState({ apiKeys: { openrouter: 'sk-test' } })
   useStreams.setState({ controllers: {}, drafts: {} })
 })
 
@@ -28,7 +28,7 @@ describe('sendMessage', () => {
   it('stores the user message and the streamed reply, and titles the chat', async () => {
     const fetchMock = vi.fn().mockResolvedValue(reply('Hi there!'))
     vi.stubGlobal('fetch', fetchMock)
-    const c = await createConversation({ model: 'openai/gpt-test', systemPrompt: 'Be brief.' })
+    const c = await createConversation({ model: 'openrouter:openai/gpt-test', systemPrompt: 'Be brief.' })
 
     await sendMessage(c.id, 'Hello\nsecond line')
 
@@ -37,7 +37,10 @@ describe('sendMessage', () => {
       ['user', 'Hello\nsecond line', 'done'],
       ['assistant', 'Hi there!', 'done'],
     ])
-    expect(messages[1]).toMatchObject({ model: 'openai/gpt-test', usage: { promptTokens: 5, completionTokens: 1 } })
+    expect(messages[1]).toMatchObject({
+      model: 'openrouter:openai/gpt-test',
+      usage: { promptTokens: 5, completionTokens: 1 },
+    })
     expect((await getConversation(c.id))?.title).toBe('Hello')
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).messages).toEqual([
       { role: 'system', content: 'Be brief.' },
@@ -62,14 +65,31 @@ describe('sendMessage', () => {
     ])
   })
 
-  it('records a missing key as an error without calling the API', async () => {
-    useSettings.setState({ apiKey: null })
+  it("records a missing key for the model's provider without calling any API", async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
-    const c = await createConversation({ model: 'm/x', systemPrompt: '' })
+    const c = await createConversation({ model: 'anthropic:claude-opus-5-5', systemPrompt: '' })
     await sendMessage(c.id, 'hi')
     expect(fetchMock).not.toHaveBeenCalled()
-    expect((await getMessages(c.id))[1]).toMatchObject({ status: 'error' })
+    expect((await getMessages(c.id))[1]).toMatchObject({
+      status: 'error',
+      error: 'Add your Anthropic API key in Settings to use this model.',
+    })
+  })
+
+  it("routes to the model's provider with that provider's key", async () => {
+    useSettings.setState({ apiKeys: { openrouter: 'sk-or', openai: 'sk-openai' } })
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([contentChunk('from OpenAI'), 'data: [DONE]\n\n']),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const c = await createConversation({ model: 'openai:gpt-5', systemPrompt: '' })
+    await sendMessage(c.id, 'hi')
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://api.openai.com/v1/chat/completions')
+    expect(init.headers.Authorization).toBe('Bearer sk-openai')
+    expect(JSON.parse(init.body).model).toBe('gpt-5')
+    expect((await getMessages(c.id))[1]).toMatchObject({ content: 'from OpenAI', model: 'openai:gpt-5' })
   })
 
   it('keeps the partial reply when stopped', async () => {

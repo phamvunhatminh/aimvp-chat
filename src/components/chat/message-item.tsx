@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { editAndResend, regenerate } from '@/lib/chat'
 import type { Message } from '@/lib/db'
-import { formatCost } from '@/lib/openrouter'
+import { formatCost } from '@/lib/format'
+import { parseModelRef, PROVIDERS } from '@/lib/providers'
 import { useStreams } from '@/stores/streams'
 
 // The markdown + syntax highlighting stack is most of the bundle; load it on demand.
@@ -157,7 +158,8 @@ function AssistantMessage({ message, isLast, busy }: { message: Message; isLast:
 }
 
 function MessageMeta({ message }: { message: Message }) {
-  const parts = [message.model]
+  const ref = message.model ? parseModelRef(message.model) : null
+  const parts = [ref && `${ref.model} · ${PROVIDERS[ref.provider].name}`]
   if (message.usage) {
     parts.push(`${(message.usage.promptTokens + message.usage.completionTokens).toLocaleString()} tokens`)
     if (message.usage.cost !== undefined) parts.push(formatCost(message.usage.cost))

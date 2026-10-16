@@ -1,4 +1,5 @@
-import { OPENROUTER_API, OpenRouterError } from './openrouter'
+import { ProviderError } from './providers/errors'
+import { OPENROUTER_API } from './providers/openrouter'
 
 // OAuth PKCE flow: https://openrouter.ai/docs/guides/overview/auth/oauth
 const VERIFIER_KEY = 'aimvp.oauth.verifier'
@@ -48,7 +49,7 @@ export function completeOpenRouterAuth(code: string): Promise<string> {
 async function exchangeCode(code: string): Promise<string> {
   const verifier = sessionStorage.getItem(VERIFIER_KEY)
   if (!verifier) {
-    throw new OpenRouterError('This sign-in link has expired. Please connect again.')
+    throw new ProviderError('This sign-in link has expired. Please connect again.', null, 'openrouter')
   }
   const res = await fetch(`${OPENROUTER_API}/auth/keys`, {
     method: 'POST',
@@ -57,9 +58,9 @@ async function exchangeCode(code: string): Promise<string> {
   })
   sessionStorage.removeItem(VERIFIER_KEY)
   if (!res.ok) {
-    throw new OpenRouterError('OpenRouter could not complete the sign-in. Please try again.', res.status)
+    throw new ProviderError('OpenRouter could not complete the sign-in. Please try again.', res.status, 'openrouter')
   }
   const body = (await res.json()) as { key?: string }
-  if (!body.key) throw new OpenRouterError('OpenRouter did not return a key. Please try again.')
+  if (!body.key) throw new ProviderError('OpenRouter did not return a key. Please try again.', null, 'openrouter')
   return body.key
 }

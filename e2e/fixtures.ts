@@ -25,7 +25,11 @@ export interface OpenRouterMock {
   /** Parsed JSON bodies of chat completion requests, in order. */
   chatRequests: Record<string, unknown>[]
   keyExchanges: number
+  /** Chat requests sent straight to OpenAI, Anthropic or Google. */
+  directRequests: { provider: string; url: string; headers: Record<string, string>; body: Record<string, unknown> }[]
 }
+
+export const DIRECT_ANSWER = 'Hello from a direct provider'
 
 function sse(text: string): string {
   let body = ': OPENROUTER PROCESSING\n\n'
@@ -37,8 +41,97 @@ function sse(text: string): string {
   return body
 }
 
+function anthropicSse(text: string): string {
+  const events: { type: string; [key: string]: unknown }[] = [
+    {
+      type: 'message_start',
+      message: {
+        id: 'msg_e2e',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-opus-5-5',
+        content: [],
+        stop_reason: null,
+        stop_sequence: null,
+        usage: { input_tokens: 10, output_tokens: 1 },
+      },
+    },
+    { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
+    { type: 'content_block_stop', index: 0 },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 5 } },
+    { type: 'message_stop' },
+  ]
+  return events.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join('')
+}
+
+/** OpenAI, Anthropic and Google, each with one model and a fixed answer. */
+async function mockDirectProviders(context: BrowserContext, mock: OpenRouterMock) {
+  const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' }
+  const sseHeaders = { ...headers, 'Content-Type': 'text/event-stream' }
+
+  const record = (provider: string, request: import('@playwright/test').Request) =>
+    mock.directRequests.push({ provider, url: request.url(), headers: request.headers(), body: request.postDataJSON() })
+
+  await context.route('https://api.openai.com/**', async (route) => {
+    const request = route.request()
+    if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers })
+    const path = new URL(request.url()).pathname
+    if (path === '/v1/models') {
+      return route.fulfill({ json: { data: [{ id: 'gpt-5', created: 2 }, { id: 'whisper-1', created: 1 }] }, headers })
+    }
+    record('openai', request)
+    const body = `data: ${JSON.stringify({ choices: [{ delta: { content: DIRECT_ANSWER } }] })}\n\n`
+    const usage = `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 8, completion_tokens: 4 } })}\n\n`
+    return route.fulfill({ body: `${body}${usage}data: [DONE]\n\n`, headers: sseHeaders })
+  })
+
+  await context.route('https://api.anthropic.com/**', async (route) => {
+    const request = route.request()
+    if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers })
+    const path = new URL(request.url()).pathname
+    if (path === '/v1/models') {
+      const model = {
+        type: 'model',
+        id: 'claude-opus-5-5',
+        display_name: 'Claude Opus 5.5',
+        created_at: '2026-09-01T00:00:00Z',
+        max_input_tokens: 1_000_000,
+        max_tokens: 128_000,
+        capabilities: { thinking: { supported: true, types: { adaptive: { supported: true } } } },
+      }
+      return route.fulfill({
+        json: { data: [model], has_more: false, first_id: model.id, last_id: model.id },
+        headers,
+      })
+    }
+    record('anthropic', request)
+    return route.fulfill({ body: anthropicSse(DIRECT_ANSWER), headers: sseHeaders })
+  })
+
+  await context.route('https://generativelanguage.googleapis.com/**', async (route) => {
+    const request = route.request()
+    if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers })
+    if (request.method() === 'GET') {
+      const model = {
+        name: 'models/gemini-2.5-flash',
+        displayName: 'Gemini 2.5 Flash',
+        supportedGenerationMethods: ['generateContent'],
+      }
+      return route.fulfill({ json: { models: [model] }, headers })
+    }
+    record('google', request)
+    const chunk = {
+      candidates: [{ content: { parts: [{ text: DIRECT_ANSWER }] }, finishReason: 'STOP' }],
+      usageMetadata: { promptTokenCount: 6, candidatesTokenCount: 3 },
+    }
+    return route.fulfill({ body: `data: ${JSON.stringify(chunk)}\n\n`, headers: sseHeaders })
+  })
+}
+
 async function mockOpenRouter(context: BrowserContext): Promise<OpenRouterMock> {
-  const mock: OpenRouterMock = { chatRequests: [], keyExchanges: 0 }
+  const mock: OpenRouterMock = { chatRequests: [], keyExchanges: 0, directRequests: [] }
+  await mockDirectProviders(context, mock)
   const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' }
 
   await context.route('https://openrouter.ai/**', async (route) => {

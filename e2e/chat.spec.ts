@@ -1,15 +1,15 @@
-import { ANSWER, composer, expect, OAUTH_KEY, openWithKey, test } from './fixtures'
+import { ANSWER, composer, DIRECT_ANSWER, expect, OAUTH_KEY, openWithKey, test } from './fixtures'
 
 test('first run: paste an API key', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Chat with any AI model' })).toBeVisible()
   await expect(composer(page)).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'Paste an API key instead' }).click()
+  await page.getByRole('button', { name: 'Use an OpenAI, Anthropic or Google key' }).click()
   await page.getByLabel('OpenRouter API key').fill('sk-or-v1-pasted-0123456789')
-  await page.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(page.getByText('Connected')).toBeVisible()
+  await page.getByRole('button', { name: 'Save', exact: true }).first().click()
   await expect(page.getByText('Used $1.23 of $10.00 limit')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Remove' })).toBeVisible()
 })
 
 test('OAuth callback stores the key and redeems the code once', async ({ page, openrouter }) => {
@@ -18,7 +18,7 @@ test('OAuth callback stores the key and redeems the code once', async ({ page, o
   await page.goto('/auth/callback?code=abc123')
   await expect(page).toHaveURL('/')
   await expect(page.getByText('What can I help with?')).toBeVisible()
-  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('aimvp.settings')!).state.apiKey)
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('aimvp.settings')!).state.apiKeys.openrouter)
   expect(saved).toBe(OAUTH_KEY)
   expect(openrouter.keyExchanges).toBe(1)
 })
@@ -42,7 +42,7 @@ test('send a message with a chosen model and system prompt', async ({ page, open
   await expect(page).toHaveURL(/\/c\/[\w-]+$/)
   await expect(page.locator('.markdown pre')).toContainText('const greet')
   await expect(page.locator('.markdown strong')).toHaveText('bold')
-  await expect(page.getByText('anthropic/claude-test · 42 tokens · $0.0004')).toBeVisible()
+  await expect(page.getByText('anthropic/claude-test · OpenRouter · 42 tokens · $0.0004')).toBeVisible()
   await expect(page).toHaveTitle('How do I greet someone? · aimvp')
 
   // Untrusted output: raw HTML is shown as text and remote images become links.
@@ -79,6 +79,72 @@ test('API errors are explained and can be retried', async ({ page, openrouter })
   await expect(page.locator('.markdown pre')).toBeVisible()
   await expect(page.getByText(/out of credits/)).toHaveCount(0)
   expect(openrouter.chatRequests.map((r) => r.model)).toEqual(['openai/broke', 'anthropic/claude-test'])
+})
+
+const DIRECT = [
+  { provider: 'openai', name: 'OpenAI', key: 'sk-proj-openai-0123456789', model: 'gpt-5', label: 'gpt-5', tokens: 12 },
+  {
+    provider: 'anthropic',
+    name: 'Anthropic',
+    key: 'sk-ant-api03-0123456789',
+    model: 'Claude Opus 5.5',
+    label: 'claude-opus-5-5',
+    tokens: 15,
+  },
+  {
+    provider: 'google',
+    name: 'Google Gemini',
+    key: 'AIzaSy-0123456789',
+    model: 'Gemini 2.5 Flash',
+    label: 'gemini-2.5-flash',
+    tokens: 9,
+  },
+] as const
+
+for (const p of DIRECT) {
+  test(`chat directly with ${p.name} using its own key`, async ({ page, openrouter }) => {
+    await openWithKey(page)
+    await page.getByRole('button', { name: 'System prompt' }).click()
+    await page.getByPlaceholder('You are a helpful assistant…').fill('Be brief.')
+    await page.getByRole('button', { name: 'Save' }).click()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+
+    if (test.info().project.name === 'mobile') await page.getByRole('button', { name: 'Open sidebar' }).click()
+    await page.getByRole('button', { name: 'Settings' }).click()
+    await page.getByLabel(`${p.name} API key`).fill(p.key)
+    await page.getByLabel(`${p.name} API key`).press('Enter')
+    await expect(page.getByText(`${p.name} key saved`)).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+
+    await page.getByRole('button', { name: /Auto Router/ }).click()
+    await expect(page.getByRole('group', { name: p.name })).toBeVisible()
+    await page.getByRole('option', { name: new RegExp(p.model) }).first().click()
+    await composer(page).fill('Hi there')
+    await page.getByRole('button', { name: 'Send message' }).click()
+
+    await expect(page.locator('.markdown')).toHaveText(DIRECT_ANSWER)
+    await expect(page.getByText(`${p.label} · ${p.name} · ${p.tokens} tokens`)).toBeVisible()
+    expect(openrouter.chatRequests).toHaveLength(0)
+    const [request] = openrouter.directRequests
+    expect(request.provider).toBe(p.provider)
+    const sentKey = request.headers['authorization'] ?? request.headers['x-api-key'] ?? request.headers['x-goog-api-key']
+    expect(sentKey?.replace('Bearer ', '')).toBe(p.key)
+    expect(JSON.stringify(request.body)).toContain('Be brief.')
+    if (p.provider === 'anthropic') {
+      expect(request.headers['anthropic-dangerous-direct-browser-access']).toBe('true')
+    }
+  })
+}
+
+test('a model whose provider has no key explains what to do', async ({ page }) => {
+  await openWithKey(page)
+  await page.getByRole('button', { name: 'Auto Router' }).click()
+  await page.getByPlaceholder('Search models…').fill('anthropic:claude-opus-5-5')
+  await page.getByRole('option', { name: /Use "claude-opus-5-5"/ }).click()
+  await expect(page.getByText('claude-opus-5-5 runs on Anthropic. Add your Anthropic key, or pick another model above.')).toBeVisible()
+  await page.getByRole('button', { name: 'Add key' }).click()
+  await expect(page.getByLabel('Anthropic API key')).toBeVisible()
 })
 
 test('history persists and can be renamed and deleted', async ({ page }) => {
