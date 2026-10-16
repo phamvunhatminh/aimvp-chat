@@ -1,5 +1,5 @@
 import { test as base, expect, type BrowserContext, type Page } from '@playwright/test'
-import { makePng } from './files'
+import { makePng, makeWav } from './files'
 
 export const MODELS = [
   { id: 'openrouter/auto', name: 'Auto Router', pricing: { prompt: '-1', completion: '-1' } },
@@ -44,11 +44,14 @@ export interface OpenRouterMock {
   /** Parsed JSON bodies of chat completion requests, in order. */
   chatRequests: Record<string, unknown>[]
   keyExchanges: number
+  /** OpenAI speech-to-text and text-to-speech requests. */
+  audioRequests: { path: string; body: string }[]
   /** Chat requests sent straight to OpenAI, Anthropic or Google. */
   directRequests: { provider: string; url: string; headers: Record<string, string>; body: Record<string, unknown> }[]
 }
 
 export const DIRECT_ANSWER = 'Hello from a direct provider'
+export const TRANSCRIPT = 'Words from the microphone'
 
 function sse(text: string): string {
   let body = ': OPENROUTER PROCESSING\n\n'
@@ -98,6 +101,11 @@ async function mockDirectProviders(context: BrowserContext, mock: OpenRouterMock
     const path = new URL(request.url()).pathname
     if (path === '/v1/models') {
       return route.fulfill({ json: { data: [{ id: 'gpt-5', created: 2 }, { id: 'whisper-1', created: 1 }] }, headers })
+    }
+    if (path.startsWith('/v1/audio/')) {
+      mock.audioRequests.push({ path, body: request.postDataBuffer()?.toString('latin1') ?? '' })
+      if (path === '/v1/audio/transcriptions') return route.fulfill({ json: { text: TRANSCRIPT }, headers })
+      return route.fulfill({ body: makeWav(300), headers: { ...headers, 'Content-Type': 'audio/wav' } })
     }
     record('openai', request)
     const body = `data: ${JSON.stringify({ choices: [{ delta: { content: DIRECT_ANSWER } }] })}\n\n`
@@ -149,7 +157,7 @@ async function mockDirectProviders(context: BrowserContext, mock: OpenRouterMock
 }
 
 async function mockOpenRouter(context: BrowserContext): Promise<OpenRouterMock> {
-  const mock: OpenRouterMock = { chatRequests: [], keyExchanges: 0, directRequests: [] }
+  const mock: OpenRouterMock = { chatRequests: [], keyExchanges: 0, audioRequests: [], directRequests: [] }
   await mockDirectProviders(context, mock)
   const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' }
 
@@ -205,6 +213,15 @@ export async function openWithKey(page: Page, path = '/') {
       JSON.stringify({ state: { apiKey: 'sk-or-v1-test-0123456789', theme: 'light' }, version: 1 }),
     )
   })
+  await page.goto(path)
+}
+
+/** Starts the app with these settings (current format) already saved. */
+export async function openWithSettings(page: Page, state: Record<string, unknown>, path = '/') {
+  await page.addInitScript((state) => {
+    if (localStorage.getItem('aimvp.settings')) return
+    localStorage.setItem('aimvp.settings', JSON.stringify({ state: { theme: 'light', ...state }, version: 2 }))
+  }, state)
   await page.goto(path)
 }
 

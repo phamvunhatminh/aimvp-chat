@@ -11,7 +11,7 @@ import { anthropic } from './anthropic'
 import { ProviderError } from './errors'
 import { google, toGeminiContents } from './google'
 import { normalizeModelRef, parseModelRef } from './models'
-import { openai } from './openai'
+import { openai, synthesizeSpeech, transcribeAudio } from './openai'
 import { fetchKeyInfo, openrouter } from './openrouter'
 import type { ChatRequest, ProviderClient, StreamEvent } from './types'
 
@@ -180,6 +180,30 @@ describe('OpenAI', () => {
   it('validates keys against the models endpoint', async () => {
     mockFetch(jsonResponse({ error: { message: 'Incorrect API key' } }, 401))
     await expect(openai.validateKey('bad')).rejects.toMatchObject({ status: 401 })
+  })
+
+  it('transcribes recorded audio, hinting the language', async () => {
+    const fetchMock = mockFetch(jsonResponse({ text: ' Xin chào ' }))
+    const audio = new Blob(['fake'], { type: 'audio/webm;codecs=opus' })
+    await expect(transcribeAudio('sk', audio, 'vi-VN')).resolves.toBe('Xin chào')
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://api.openai.com/v1/audio/transcriptions')
+    // The browser sets the multipart boundary itself.
+    expect(new Headers(init.headers).has('Content-Type')).toBe(false)
+    const form = init.body as FormData
+    expect((form.get('file') as File).name).toBe('speech.webm')
+    expect(form.get('model')).toBe('gpt-4o-mini-transcribe')
+    expect(form.get('language')).toBe('vi')
+  })
+
+  it('synthesizes speech as MP3', async () => {
+    const fetchMock = mockFetch(new Response('mp3', { headers: { 'Content-Type': 'audio/mpeg' } }))
+    const audio = await synthesizeSpeech('sk', 'Hello there.', 'coral')
+    expect(audio.type).toBe('audio/mpeg')
+    const req = requestOf(fetchMock)
+    expect(req.url).toBe('https://api.openai.com/v1/audio/speech')
+    expect(req.headers.get('Content-Type')).toBe('application/json')
+    expect(req.body).toEqual({ model: 'gpt-4o-mini-tts', voice: 'coral', input: 'Hello there.', response_format: 'mp3' })
   })
 })
 

@@ -22,7 +22,11 @@ function normalizeStatus(status: number | null, error: ApiErrorBody) {
 async function openaiFetch(path: string, apiKey: string, init: RequestInit = {}) {
   const res = await fetch(`${OPENAI_API}${path}`, {
     ...init,
-    headers: { Authorization: `Bearer ${apiKey}`, ...(init.body ? { 'Content-Type': 'application/json' } : {}) },
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      // FormData bodies set their own multipart Content-Type.
+      ...(typeof init.body === 'string' ? { 'Content-Type': 'application/json' } : {}),
+    },
   })
   if (!res.ok) {
     const error = await readErrorBody(res)
@@ -57,6 +61,29 @@ async function* generateImage({ apiKey, model, messages, signal }: ChatRequest):
       usage: { promptTokens: body.usage.input_tokens ?? 0, completionTokens: body.usage.output_tokens ?? 0 },
     }
   }
+}
+
+export const TRANSCRIBE_MODEL = 'gpt-4o-mini-transcribe'
+export const SPEECH_MODEL = 'gpt-4o-mini-tts'
+/** Speech to text. `language` (e.g. `vi-VN`) is a hint; empty lets the model detect it. */
+export async function transcribeAudio(apiKey: string, audio: Blob, language: string, signal?: AbortSignal) {
+  const form = new FormData()
+  // OpenAI reads the format from the file extension: audio/webm;codecs=opus → speech.webm.
+  form.append('file', audio, `speech.${audio.type.split(/[/;]/)[1] || 'webm'}`)
+  form.append('model', TRANSCRIBE_MODEL)
+  if (language) form.append('language', language.split('-')[0])
+  const res = await openaiFetch('/audio/transcriptions', apiKey, { method: 'POST', body: form, signal })
+  return ((await res.json()) as { text?: string }).text?.trim() ?? ''
+}
+
+/** Text to speech, as MP3. Input is limited to 4096 characters. */
+export async function synthesizeSpeech(apiKey: string, input: string, voice: string, signal?: AbortSignal) {
+  const res = await openaiFetch('/audio/speech', apiKey, {
+    method: 'POST',
+    body: JSON.stringify({ model: SPEECH_MODEL, voice, input, response_format: 'mp3' }),
+    signal,
+  })
+  return res.blob()
 }
 
 export const openai: ProviderClient = {

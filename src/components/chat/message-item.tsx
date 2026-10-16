@@ -1,4 +1,4 @@
-import { AlertCircleIcon, BrainIcon, PencilIcon, RefreshCwIcon } from 'lucide-react'
+import { AlertCircleIcon, BrainIcon, Loader2Icon, PencilIcon, RefreshCwIcon, SquareIcon, Volume2Icon } from 'lucide-react'
 import { lazy, Suspense, useState } from 'react'
 import { CopyButton } from '@/components/copy-button'
 import { Button } from '@/components/ui/button'
@@ -6,9 +6,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { editAndResend, regenerate } from '@/lib/chat'
 import type { Message } from '@/lib/db'
 import { formatCost } from '@/lib/format'
-import { MessageAttachments } from './attachments'
 import { parseModelRef, PROVIDERS } from '@/lib/providers'
+import { readAloud, stopReading, useCanReadAloud, useReadAloud } from '@/lib/read-aloud'
 import { useStreams } from '@/stores/streams'
+import { MessageAttachments } from './attachments'
 
 // The markdown + syntax highlighting stack is most of the bundle; load it on demand.
 const Markdown = lazy(() => import('@/components/markdown').then((m) => ({ default: m.Markdown })))
@@ -144,6 +145,7 @@ function AssistantMessage({ message, isLast, busy }: { message: Message; isLast:
       {!streaming && (
         <div className={actionRow}>
           {content && <CopyButton getText={() => content} />}
+          {content && <ReadAloudButton messageId={message.id} content={content} />}
           {canRegenerate && message.status === 'done' && (
             <Button
               variant="ghost"
@@ -160,6 +162,31 @@ function AssistantMessage({ message, isLast, busy }: { message: Message; isLast:
         </div>
       )}
     </div>
+  )
+}
+
+function ReadAloudButton({ messageId, content }: { messageId: string; content: string }) {
+  const available = useCanReadAloud()
+  const reading = useReadAloud((s) => s.messageId === messageId)
+  const loading = useReadAloud((s) => s.messageId === messageId && s.loading)
+  if (!available) return null
+  return (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      className="size-7"
+      onClick={() => (reading ? stopReading() : readAloud(messageId, content))}
+      aria-label={reading ? 'Stop reading' : 'Read aloud'}
+      title={reading ? 'Stop reading' : 'Read aloud'}
+    >
+      {loading ? (
+        <Loader2Icon className="animate-spin" />
+      ) : reading ? (
+        <SquareIcon className="size-3 fill-current" />
+      ) : (
+        <Volume2Icon />
+      )}
+    </Button>
   )
 }
 

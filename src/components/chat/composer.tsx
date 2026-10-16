@@ -1,6 +1,7 @@
-import { AlertTriangleIcon, ArrowUpIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { AlertTriangleIcon, ArrowUpIcon, Loader2Icon, MicIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
+import { useVoiceInput } from '@/hooks/use-voice-input'
 import { ACCEPT, type PreparedFile } from '@/lib/files'
 import { parseModelRef } from '@/lib/providers'
 import { isTouchDevice } from '@/lib/utils'
@@ -33,6 +34,9 @@ export function Composer({
   const hasImages = files.some((f) => f.prepared?.attachment.kind === 'image')
   const { provider, model } = parseModelRef(modelRef)
   const readsImages = useModelCatalog((s) => s.byProvider[provider]?.models.find((m) => m.id === model)?.inputs?.image)
+  const voice = useVoiceInput({ getText: () => ref.current?.value ?? '', setText })
+  // OpenAI dictation lands in the text box only after recording stops.
+  const awaitingDictation = voice.engine === 'openai' && voice.status !== 'idle'
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -41,10 +45,11 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 208)}px`
   }, [text])
 
-  const canSend = (text.trim() !== '' || files.length > 0) && !processing && !streaming
+  const canSend = (text.trim() !== '' || files.length > 0) && !processing && !streaming && !awaitingDictation
 
   function submit() {
     if (!canSend) return
+    voice.cancel()
     onSend(text.trim(), takeFiles())
     setText('')
   }
@@ -113,7 +118,8 @@ export function Composer({
               <span className="truncate">This model can't read images</span>
             </span>
           )}
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-1">
+            <VoiceButton voice={voice} />
             {streaming ? (
               <Button type="button" size="icon" className="rounded-full" onClick={onStop} aria-label="Stop generating">
                 <SquareIcon className="size-3.5 fill-current" />
@@ -128,5 +134,49 @@ export function Composer({
       </form>
       <p className="mt-2 text-center text-xs text-muted-foreground">AI can make mistakes. Check important info.</p>
     </div>
+  )
+}
+
+function VoiceButton({ voice }: { voice: ReturnType<typeof useVoiceInput> }) {
+  if (!voice.engine) return null
+  if (voice.status === 'transcribing') {
+    return (
+      <Button type="button" variant="ghost" size="icon" className="rounded-full" disabled aria-label="Transcribing">
+        <Loader2Icon className="animate-spin" />
+      </Button>
+    )
+  }
+  const listening = voice.status === 'listening'
+  return (
+    <>
+      {listening && voice.startedAt !== null && <RecordingTimer startedAt={voice.startedAt} />}
+      <Button
+        type="button"
+        variant={listening ? 'destructive' : 'ghost'}
+        size="icon"
+        className={listening ? 'relative rounded-full' : 'rounded-full text-muted-foreground'}
+        onClick={listening ? voice.stop : voice.start}
+        aria-label={listening ? 'Stop voice input' : 'Start voice input'}
+        aria-pressed={listening}
+        title={listening ? 'Stop' : 'Voice input'}
+      >
+        {listening && <span className="absolute inset-0 animate-ping rounded-full bg-destructive/40" />}
+        {listening ? <SquareIcon className="size-3.5 fill-current" /> : <MicIcon />}
+      </Button>
+    </>
+  )
+}
+
+function RecordingTimer({ startedAt }: { startedAt: number }) {
+  const [now, setNow] = useState(startedAt)
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 500)
+    return () => clearInterval(timer)
+  }, [])
+  const seconds = Math.max(0, Math.floor((now - startedAt) / 1000))
+  return (
+    <span className="text-xs text-muted-foreground tabular-nums" aria-label="Recording time">
+      {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}
+    </span>
   )
 }

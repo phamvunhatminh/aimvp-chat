@@ -66,3 +66,22 @@ export function makeDocx(paragraphs: string[]): Buffer {
   const xml = `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`
   return Buffer.from(zipSync({ 'word/document.xml': strToU8(xml) }))
 }
+
+/** Silent 8 kHz mono WAV audio. */
+export function makeWav(ms: number): Buffer {
+  const samples = Math.round((8000 * ms) / 1000)
+  const wav = Buffer.alloc(44 + samples, 128)
+  wav.write('RIFF', 0, 'ascii')
+  wav.writeUInt32LE(36 + samples, 4)
+  wav.write('WAVEfmt ', 8, 'ascii')
+  wav.writeUInt32LE(16, 16)
+  wav.writeUInt16LE(1, 20) // PCM
+  wav.writeUInt16LE(1, 22) // mono
+  wav.writeUInt32LE(8000, 24)
+  wav.writeUInt32LE(8000, 28)
+  wav.writeUInt16LE(1, 32)
+  wav.writeUInt16LE(8, 34)
+  wav.write('data', 36, 'ascii')
+  wav.writeUInt32LE(samples, 40)
+  return wav
+}

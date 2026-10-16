@@ -14,6 +14,7 @@ import { downloadFile } from '@/lib/download'
 import { conversationToMarkdown, slugify } from '@/lib/export-chat'
 import type { PreparedFile } from '@/lib/files'
 import { parseModelRef, PROVIDERS } from '@/lib/providers'
+import { stopReading } from '@/lib/read-aloud'
 import { createConversation, updateConversation } from '@/lib/repo'
 import { useModelInfo, useModelName } from '@/stores/models'
 import { addFiles } from '@/stores/composer'
@@ -48,6 +49,9 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
     const name = conversation?.title ?? (newChatProjectId ? project?.name : undefined)
     document.title = name ? `${name} · aimvp` : 'aimvp'
   }, [conversation, project, newChatProjectId])
+
+  // Stop reading a reply aloud when leaving its chat.
+  useEffect(() => stopReading, [])
 
   if (id && conversation === null) return <NotFound what="Chat" />
   if (newChatProjectId && project === null) return <NotFound what="Project" />
