@@ -27,7 +27,7 @@ test('send a message with a chosen model and system prompt', async ({ page, open
   await openWithKey(page)
 
   await page.getByRole('button', { name: 'Auto Router' }).click()
-  await expect(page.getByText('Image Only')).toHaveCount(0)
+  await expect(page.getByText('Audio Only')).toHaveCount(0)
   await page.getByPlaceholder('Search models…').fill('claude')
   await page.getByRole('option', { name: /Claude Test/ }).click()
 
@@ -154,7 +154,7 @@ test('history persists and can be renamed and deleted', async ({ page }) => {
   await expect(page.locator('.markdown pre')).toBeVisible()
 
   await page.reload()
-  await expect(page.getByRole('main').getByText('Remember me', { exact: true })).toBeVisible()
+  await expect(page.getByRole('main').getByText('Remember me', { exact: true }).filter({ visible: true })).toBeVisible()
   await expect(page.locator('.markdown pre')).toBeVisible()
 
   if (test.info().project.name === 'mobile') await page.getByRole('button', { name: 'Open sidebar' }).click()
@@ -178,11 +178,11 @@ test('edit a sent message and get a new answer', async ({ page, openrouter }) =>
   await page.getByRole('button', { name: 'Send message' }).click()
   await expect(page.locator('.markdown pre')).toBeVisible()
 
-  await page.getByRole('main').getByText('Original question', { exact: true }).hover()
+  await page.getByRole('main').getByText('Original question', { exact: true }).filter({ visible: true }).hover()
   await page.getByRole('button', { name: 'Edit message' }).click()
   await page.getByLabel('Edit message').fill('Edited question')
   await page.getByRole('button', { name: 'Send', exact: true }).click()
-  await expect(page.getByRole('main').getByText('Edited question', { exact: true })).toBeVisible()
+  await expect(page.getByRole('main').getByText('Edited question', { exact: true }).filter({ visible: true })).toBeVisible()
   await expect.poll(() => openrouter.chatRequests.length).toBe(2)
   expect(openrouter.chatRequests[1].messages).toEqual([{ role: 'user', content: 'Edited question' }])
   await expect(page.locator('.markdown pre')).toHaveCount(1)

@@ -6,6 +6,9 @@ export type Theme = 'system' | 'light' | 'dark'
 
 export type ApiKeys = Partial<Record<ProviderId, string>>
 
+/** Who turns speech into text and back: the browser (free) or OpenAI (billed to the OpenAI key). */
+export type SpeechEngine = 'browser' | 'openai'
+
 interface SettingsState {
   /** The user's own keys. They never leave this browser except to call that provider. */
   apiKeys: ApiKeys
@@ -14,16 +17,38 @@ interface SettingsState {
   defaultSystemPrompt: string
   favoriteModels: string[]
   theme: Theme
+  speechInput: SpeechEngine
+  speechOutput: SpeechEngine
+  /** OpenAI voice for read aloud. */
+  speechVoice: string
+  /** BCP 47 tag such as `vi-VN`, or '' to follow the browser. */
+  speechLanguage: string
+  /** Show this month's spend in the sidebar. */
+  showUsageInSidebar: boolean
+  /** USD a month, to compare spend against; null for none. */
+  monthlyBudget: number | null
   setApiKey: (provider: ProviderId, apiKey: string | null) => void
   setDefaultModel: (model: string) => void
   setDefaultSystemPrompt: (prompt: string) => void
   toggleFavoriteModel: (model: string) => void
   setTheme: (theme: Theme) => void
+  setSpeech: (speech: Partial<Pick<SettingsState, 'speechInput' | 'speechOutput' | 'speechVoice' | 'speechLanguage'>>) => void
+  setUsagePrefs: (prefs: Partial<Pick<SettingsState, 'showUsageInSidebar' | 'monthlyBudget'>>) => void
 }
 
 type PersistedSettings = Pick<
   SettingsState,
-  'apiKeys' | 'defaultModel' | 'defaultSystemPrompt' | 'favoriteModels' | 'theme'
+  | 'apiKeys'
+  | 'defaultModel'
+  | 'defaultSystemPrompt'
+  | 'favoriteModels'
+  | 'theme'
+  | 'speechInput'
+  | 'speechOutput'
+  | 'speechVoice'
+  | 'speechLanguage'
+  | 'showUsageInSidebar'
+  | 'monthlyBudget'
 >
 
 /** Providers the user has a key for, in display order. */
@@ -55,6 +80,12 @@ export const useSettings = create<SettingsState>()(
       defaultSystemPrompt: '',
       favoriteModels: [],
       theme: 'system',
+      speechInput: 'browser',
+      speechOutput: 'browser',
+      speechVoice: 'alloy',
+      speechLanguage: '',
+      showUsageInSidebar: true,
+      monthlyBudget: null,
       setApiKey: (provider, apiKey) =>
         set((s) => {
           const apiKeys = { ...s.apiKeys }
@@ -71,18 +102,26 @@ export const useSettings = create<SettingsState>()(
             : [...s.favoriteModels, model],
         })),
       setTheme: (theme) => set({ theme }),
+      setSpeech: (speech) => set(speech),
+      setUsagePrefs: (prefs) => set(prefs),
     }),
     {
       // public/theme-init.js reads `state.theme` from this key before first paint.
       name: 'aimvp.settings',
       version: 2,
       migrate: migrateSettings,
-      partialize: ({ apiKeys, defaultModel, defaultSystemPrompt, favoriteModels, theme }): PersistedSettings => ({
-        apiKeys,
-        defaultModel,
-        defaultSystemPrompt,
-        favoriteModels,
-        theme,
+      partialize: (s): PersistedSettings => ({
+        apiKeys: s.apiKeys,
+        defaultModel: s.defaultModel,
+        defaultSystemPrompt: s.defaultSystemPrompt,
+        favoriteModels: s.favoriteModels,
+        theme: s.theme,
+        speechInput: s.speechInput,
+        speechOutput: s.speechOutput,
+        speechVoice: s.speechVoice,
+        speechLanguage: s.speechLanguage,
+        showUsageInSidebar: s.showUsageInSidebar,
+        monthlyBudget: s.monthlyBudget,
       }),
     },
   ),

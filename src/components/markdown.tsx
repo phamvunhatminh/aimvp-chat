@@ -1,8 +1,11 @@
-import { ImageIcon } from 'lucide-react'
+import { DownloadIcon, ImageIcon } from 'lucide-react'
 import { isValidElement, memo, useRef, type ComponentProps, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import rehypeHighlight from 'rehype-highlight'
 import remarkGfm from 'remark-gfm'
+import { Button } from '@/components/ui/button'
+import { downloadFile } from '@/lib/download'
+import { codeFilename } from '@/lib/export-chat'
 import { CopyButton } from './copy-button'
 
 function languageOf(children: ReactNode): string | null {
@@ -12,11 +15,24 @@ function languageOf(children: ReactNode): string | null {
 
 function CodeBlock({ children, ...props }: ComponentProps<'pre'>) {
   const ref = useRef<HTMLPreElement>(null)
+  const language = languageOf(children)
   return (
     <div className="code-block overflow-hidden rounded-lg border bg-code">
       <div className="flex items-center justify-between border-b py-0.5 pr-1 pl-3 text-xs text-muted-foreground">
-        <span>{languageOf(children) ?? 'text'}</span>
-        <CopyButton label="Copy code" getText={() => ref.current?.textContent ?? ''} />
+        <span>{language ?? 'text'}</span>
+        <div className="flex items-center print:hidden">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="size-7 text-muted-foreground"
+            onClick={() => downloadFile(ref.current?.textContent ?? '', codeFilename(language), 'text/plain')}
+            aria-label="Download code"
+            title="Download code"
+          >
+            <DownloadIcon />
+          </Button>
+          <CopyButton label="Copy code" getText={() => ref.current?.textContent ?? ''} />
+        </div>
       </div>
       <pre ref={ref} className="overflow-x-auto p-3" {...props}>
         {children}

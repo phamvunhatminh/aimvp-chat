@@ -11,7 +11,7 @@ import { anthropic } from './anthropic'
 import { ProviderError } from './errors'
 import { google, toGeminiContents } from './google'
 import { normalizeModelRef, parseModelRef } from './models'
-import { openai } from './openai'
+import { openai, synthesizeSpeech, transcribeAudio } from './openai'
 import { fetchKeyInfo, openrouter } from './openrouter'
 import type { ChatRequest, ProviderClient, StreamEvent } from './types'
 
@@ -71,7 +71,7 @@ describe('model references', () => {
 })
 
 describe('OpenRouter', () => {
-  it('lists text models sorted by name', async () => {
+  it('lists text and image models sorted by name', async () => {
     mockFetch(
       jsonResponse({
         data: [
@@ -81,7 +81,7 @@ describe('OpenRouter', () => {
         ],
       }),
     )
-    expect((await openrouter.listModels(null)).map((m) => m.id)).toEqual(['a/y', 'b/x'])
+    expect((await openrouter.listModels(null)).map((m) => m.id)).toEqual(['a/y', 'img/z', 'b/x'])
   })
 
   it('streams content, reasoning and usage with cost', async () => {
@@ -131,7 +131,7 @@ describe('OpenRouter', () => {
 })
 
 describe('OpenAI', () => {
-  it('lists only chat models, newest first', async () => {
+  it('lists chat and image models, newest first', async () => {
     const fetchMock = mockFetch(
       jsonResponse({
         data: [
@@ -149,7 +149,7 @@ describe('OpenAI', () => {
         ],
       }),
     )
-    expect((await openai.listModels('sk')).map((m) => m.id)).toEqual(['gpt-5', 'o3', 'gpt-4o-mini'])
+    expect((await openai.listModels('sk')).map((m) => m.id)).toEqual(['gpt-image-1', 'dall-e-3', 'gpt-5', 'o3', 'gpt-4o-mini'])
     expect(requestOf(fetchMock).headers.get('Authorization')).toBe('Bearer sk')
   })
 
@@ -180,6 +180,30 @@ describe('OpenAI', () => {
   it('validates keys against the models endpoint', async () => {
     mockFetch(jsonResponse({ error: { message: 'Incorrect API key' } }, 401))
     await expect(openai.validateKey('bad')).rejects.toMatchObject({ status: 401 })
+  })
+
+  it('transcribes recorded audio, hinting the language', async () => {
+    const fetchMock = mockFetch(jsonResponse({ text: ' Xin chào ' }))
+    const audio = new Blob(['fake'], { type: 'audio/webm;codecs=opus' })
+    await expect(transcribeAudio('sk', audio, 'vi-VN')).resolves.toBe('Xin chào')
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('https://api.openai.com/v1/audio/transcriptions')
+    // The browser sets the multipart boundary itself.
+    expect(new Headers(init.headers).has('Content-Type')).toBe(false)
+    const form = init.body as FormData
+    expect((form.get('file') as File).name).toBe('speech.webm')
+    expect(form.get('model')).toBe('gpt-4o-mini-transcribe')
+    expect(form.get('language')).toBe('vi')
+  })
+
+  it('synthesizes speech as MP3', async () => {
+    const fetchMock = mockFetch(new Response('mp3', { headers: { 'Content-Type': 'audio/mpeg' } }))
+    const audio = await synthesizeSpeech('sk', 'Hello there.', 'coral')
+    expect(audio.type).toBe('audio/mpeg')
+    const req = requestOf(fetchMock)
+    expect(req.url).toBe('https://api.openai.com/v1/audio/speech')
+    expect(req.headers.get('Content-Type')).toBe('application/json')
+    expect(req.body).toEqual({ model: 'gpt-4o-mini-tts', voice: 'coral', input: 'Hello there.', response_format: 'mp3' })
   })
 })
 
@@ -380,5 +404,242 @@ describe('Google Gemini', () => {
       { role: 'user', parts: [{ text: 'a' }] },
       { role: 'model', parts: [{ text: 'b' }] },
     ])
+  })
+})
+
+describe('images and documents', () => {
+  const withFiles = [
+    {
+      role: 'user' as const,
+      content: [
+        { type: 'image' as const, mimeType: 'image/jpeg', data: 'SU1H' },
+        { type: 'document' as const, name: 'report.pdf', data: 'UERG', text: 'Quarterly numbers' },
+        { type: 'text' as const, text: 'Summarize these' },
+      ],
+    },
+  ]
+
+  it('OpenAI-style APIs get image data URLs and the PDF as text', async () => {
+    const fetchMock = mockFetch(sseResponse([contentChunk('ok'), 'data: [DONE]\n\n']))
+    await collect(openrouter, { apiKey: 'k', model: 'a/b', messages: withFiles })
+    expect(requestOf(fetchMock).body.messages[0].content).toEqual([
+      { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,SU1H' } },
+      { type: 'text', text: '<file name="report.pdf">\nQuarterly numbers\n</file>' },
+      { type: 'text', text: 'Summarize these' },
+    ])
+  })
+
+  it('Anthropic gets image and document blocks', async () => {
+    const fetchMock = mockFetch(anthropicStream({ text: ['ok'] }))
+    await collect(anthropic, { apiKey: 'k', model: 'claude-opus-5-5', messages: withFiles })
+    expect(requestOf(fetchMock).body.messages[0].content).toEqual([
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'SU1H' } },
+      { type: 'document', title: 'report.pdf', source: { type: 'base64', media_type: 'application/pdf', data: 'UERG' } },
+      { type: 'text', text: 'Summarize these' },
+    ])
+  })
+
+  it('Gemini gets inline data parts', async () => {
+    const fetchMock = mockFetch(sseResponse([dataEvent({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] })]))
+    await collect(google, { apiKey: 'k', model: 'gemini-2.5-flash', messages: withFiles })
+    expect(requestOf(fetchMock).body.contents[0].parts).toEqual([
+      { inlineData: { mimeType: 'image/jpeg', data: 'SU1H' } },
+      { inlineData: { mimeType: 'application/pdf', data: 'UERG' } },
+      { text: 'Summarize these' },
+    ])
+  })
+
+  it('reports which models read images', async () => {
+    mockFetch(
+      jsonResponse({
+        data: [
+          { id: 'v/see', name: 'Sees', architecture: { input_modalities: ['text', 'image', 'file'], output_modalities: ['text'] } },
+          { id: 't/text', name: 'Text', architecture: { input_modalities: ['text'], output_modalities: ['text'] } },
+        ],
+      }),
+    )
+    const models = await openrouter.listModels(null)
+    expect(models.map((m) => m.inputs)).toEqual([{ image: true, pdf: true }, { image: false, pdf: false }])
+
+    mockFetch(jsonResponse({ data: [{ id: 'gpt-5' }, { id: 'gpt-3.5-turbo' }] }))
+    expect((await openai.listModels('sk')).map((m) => [m.id, m.inputs?.image])).toEqual([
+      ['gpt-5', true],
+      ['gpt-3.5-turbo', false],
+    ])
+  })
+})
+
+describe('image generation', () => {
+  const prompt = [{ role: 'user' as const, content: 'A red fox' }]
+
+  it('OpenRouter image models ask for images and stream them back', async () => {
+    const fetchMock = mockFetch(
+      sseResponse([
+        dataEvent({ choices: [{ delta: { content: 'Here you go', images: [{ image_url: { url: 'data:image/png;base64,UE5H' } }] } }] }),
+        'data: [DONE]\n\n',
+      ]),
+    )
+    const events = await collect(openrouter, {
+      apiKey: 'k',
+      model: 'google/gemini-image',
+      modelInfo: { id: 'google/gemini-image', name: 'Image', outputs: { image: true, text: true } },
+      messages: prompt,
+    })
+    expect(events).toEqual([
+      { type: 'content', text: 'Here you go' },
+      { type: 'image', mimeType: 'image/png', data: 'UE5H' },
+    ])
+    expect(requestOf(fetchMock).body.modalities).toEqual(['image', 'text'])
+  })
+
+  it('OpenAI image models use the Images API', async () => {
+    const fetchMock = mockFetch(
+      jsonResponse({ data: [{ b64_json: 'SU1H' }], output_format: 'png', usage: { input_tokens: 9, output_tokens: 100 } }),
+    )
+    expect(await collect(openai, { apiKey: 'sk', model: 'gpt-image-1', messages: prompt })).toEqual([
+      { type: 'image', mimeType: 'image/png', data: 'SU1H' },
+      { type: 'usage', usage: { promptTokens: 9, completionTokens: 100 } },
+    ])
+    const req = requestOf(fetchMock)
+    expect(req.url).toBe('https://api.openai.com/v1/images/generations')
+    expect(req.body).toEqual({ model: 'gpt-image-1', prompt: 'A red fox', n: 1 })
+  })
+
+  it('OpenAI lists image models separately from chat models', async () => {
+    mockFetch(jsonResponse({ data: [{ id: 'gpt-image-1', created: 5 }, { id: 'dall-e-2', created: 1 }, { id: 'gpt-5', created: 4 }] }))
+    expect((await openai.listModels('sk')).map((m) => [m.id, m.outputs?.image ?? false])).toEqual([
+      ['gpt-image-1', true],
+      ['gpt-5', false],
+    ])
+  })
+
+  it('Gemini image models return inline images', async () => {
+    const fetchMock = mockFetch(
+      sseResponse([dataEvent({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'R0VN' } }] } }] })]),
+    )
+    expect(await collect(google, { apiKey: 'k', model: 'gemini-2.5-flash-image', messages: prompt })).toEqual([
+      { type: 'image', mimeType: 'image/png', data: 'R0VN' },
+    ])
+    expect(requestOf(fetchMock).body.generationConfig).toEqual({ responseModalities: ['TEXT', 'IMAGE'] })
+  })
+})
+
+describe('web search', () => {
+  const searching = { apiKey: 'k', model: 'm', messages, webSearch: true }
+  const sources = (events: StreamEvent[]) => events.flatMap((e) => (e.type === 'sources' ? e.sources : []))
+
+  it('OpenRouter adds its search tool and reads url citations', async () => {
+    const citation = { type: 'url_citation', url_citation: { url: 'https://example.com/a', title: 'Example A' } }
+    const fetchMock = mockFetch(
+      sseResponse([
+        dataEvent({ choices: [{ delta: { content: 'Found it.', annotations: [citation] } }] }),
+        dataEvent({ choices: [{ delta: { annotations: [{ type: 'url_citation', url_citation: { url: 'javascript:alert(1)' } }] } }] }),
+        'data: [DONE]\n\n',
+      ]),
+    )
+    const events = await collect(openrouter, { ...searching, model: 'a/b' })
+    expect(sources(events)).toEqual([{ url: 'https://example.com/a', title: 'Example A' }])
+    expect(requestOf(fetchMock).body.tools).toEqual([{ type: 'openrouter:web_search' }])
+  })
+
+  it('Claude searches with the web search tool and cites results', async () => {
+    const stream = (stopReason: string, text: string, search: boolean) =>
+      sseResponse(
+        [
+          {
+            type: 'message_start',
+            message: { id: 'msg', type: 'message', role: 'assistant', model: 'm', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } },
+          },
+          ...(search
+            ? [
+                { type: 'content_block_start', index: 0, content_block: { type: 'server_tool_use', id: 'srv', name: 'web_search', input: {} } },
+                { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"query":"news"}' } },
+                { type: 'content_block_stop', index: 0 },
+                {
+                  type: 'content_block_start',
+                  index: 1,
+                  content_block: {
+                    type: 'web_search_tool_result',
+                    tool_use_id: 'srv',
+                    content: [{ type: 'web_search_result', url: 'https://news.example/1', title: 'News 1', encrypted_content: 'e', page_age: null }],
+                  },
+                },
+                { type: 'content_block_stop', index: 1 },
+              ]
+            : []),
+          { type: 'content_block_start', index: 2, content_block: { type: 'text', text: '' } },
+          ...(search
+            ? [
+                {
+                  type: 'content_block_delta',
+                  index: 2,
+                  delta: {
+                    type: 'citations_delta',
+                    citation: { type: 'web_search_result_location', url: 'https://news.example/1', title: 'News 1', cited_text: 'x', encrypted_index: 'i' },
+                  },
+                },
+              ]
+            : []),
+          { type: 'content_block_delta', index: 2, delta: { type: 'text_delta', text } },
+          { type: 'content_block_stop', index: 2 },
+          { type: 'message_delta', delta: { stop_reason: stopReason, stop_sequence: null }, usage: { output_tokens: 5 } },
+          { type: 'message_stop' },
+        ].map(namedEvent),
+      )
+    // The first turn pauses mid-search; the second finishes it.
+    const fetchMock = mockFetch(stream('pause_turn', 'Searching. ', true), stream('end_turn', 'Done.', false))
+    const events = await collect(anthropic, searching)
+
+    expect(events.filter((e) => e.type === 'content').map((e) => (e as { text: string }).text).join('')).toBe('Searching. Done.')
+    expect(sources(events)).toEqual([{ url: 'https://news.example/1', title: 'News 1' }])
+    expect(events.at(-1)).toEqual({ type: 'usage', usage: { promptTokens: 20, completionTokens: 10 } })
+    const first = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(first.tools).toEqual([{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }])
+    const second = JSON.parse(fetchMock.mock.calls[1][1].body)
+    expect(second.messages.at(-1).role).toBe('assistant')
+    expect(second.messages.at(-1).content.map((b: { type: string }) => b.type)).toEqual([
+      'server_tool_use',
+      'web_search_tool_result',
+      'text',
+    ])
+  })
+
+  it('Gemini grounds with Google Search', async () => {
+    const chunk = {
+      candidates: [
+        {
+          content: { parts: [{ text: 'Answer' }] },
+          finishReason: 'STOP',
+          groundingMetadata: { groundingChunks: [{ web: { uri: 'https://vertexaisearch.cloud.google.com/r/1', title: 'example.org' } }] },
+        },
+      ],
+    }
+    const fetchMock = mockFetch(sseResponse([dataEvent(chunk)]))
+    const events = await collect(google, { ...searching, model: 'gemini-2.5-flash' })
+    expect(sources(events)).toEqual([{ url: 'https://vertexaisearch.cloud.google.com/r/1', title: 'example.org' }])
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).tools).toEqual([{ google_search: {} }])
+  })
+
+  it('OpenAI searches through the Responses API', async () => {
+    const annotation = { type: 'url_citation', url: 'https://openai.example/x', title: 'X' }
+    const fetchMock = mockFetch(
+      sseResponse([
+        dataEvent({ type: 'response.created' }),
+        dataEvent({ type: 'response.output_text.delta', delta: 'Hi ' }),
+        dataEvent({ type: 'response.output_text.annotation.added', annotation: { ...annotation, start_index: 0, end_index: 2 } }),
+        dataEvent({ type: 'response.output_text.delta', delta: 'there' }),
+        dataEvent({ type: 'response.completed', response: { usage: { input_tokens: 7, output_tokens: 3 } } }),
+      ]),
+    )
+    const events = await collect(openai, { ...searching, model: 'gpt-5', messages: [{ role: 'user', content: 'hi' }] })
+    expect(events).toEqual([
+      { type: 'content', text: 'Hi ' },
+      { type: 'sources', sources: [{ url: 'https://openai.example/x', title: 'X' }] },
+      { type: 'content', text: 'there' },
+      { type: 'usage', usage: { promptTokens: 7, completionTokens: 3 } },
+    ])
+    const req = requestOf(fetchMock)
+    expect(req.url).toBe('https://api.openai.com/v1/responses')
+    expect(req.body).toMatchObject({ model: 'gpt-5', tools: [{ type: 'web_search' }], stream: true, input: [{ role: 'user', content: 'hi' }] })
   })
 })

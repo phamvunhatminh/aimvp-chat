@@ -1,5 +1,14 @@
-import { DownloadIcon, ExternalLinkIcon, KeyRoundIcon, MonitorIcon, MoonIcon, SunIcon, TrashIcon, UploadIcon } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  DownloadIcon,
+  ExternalLinkIcon,
+  KeyRoundIcon,
+  MonitorIcon,
+  MoonIcon,
+  SunIcon,
+  TrashIcon,
+  UploadIcon,
+} from 'lucide-react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { ModelPicker } from '@/components/model-picker'
@@ -18,14 +27,17 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { connectOpenRouter } from '@/lib/connect'
 import { formatCost } from '@/lib/format'
 import { loadProvider, PROVIDER_IDS, PROVIDERS, ProviderError, type ProviderId } from '@/lib/providers'
 import { fetchKeyInfo, type KeyInfo } from '@/lib/providers/openrouter'
 import { deleteAllData, exportData, importData } from '@/lib/repo'
+import { browserRecognition, canSpeakInBrowser, OPENAI_VOICES, resolveEngine, SPEECH_LANGUAGES } from '@/lib/speech'
 import { cn } from '@/lib/utils'
-import { useSettings, type Theme } from '@/stores/settings'
+import { usePrompts } from '@/hooks/use-data'
+import { useSettings, type SpeechEngine, type Theme } from '@/stores/settings'
 import { useStreams } from '@/stores/streams'
 import { useUI } from '@/stores/ui'
 
@@ -43,6 +55,8 @@ export function SettingsDialog() {
         <div className="divide-y">
           <ApiKeysSection />
           <DefaultsSection />
+          <VoiceSection />
+          <UsageSection />
           <AppearanceSection />
           <DataSection />
         </div>
@@ -196,6 +210,8 @@ function DefaultsSection() {
   const setDefaultModel = useSettings((s) => s.setDefaultModel)
   const defaultSystemPrompt = useSettings((s) => s.defaultSystemPrompt)
   const setDefaultSystemPrompt = useSettings((s) => s.setDefaultSystemPrompt)
+  const openPromptLibrary = useUI((s) => s.openPromptLibrary)
+  const prompts = usePrompts()
 
   return (
     <Section title="New chats" description="Used when you start a new chat. Each chat can override them.">
@@ -212,6 +228,184 @@ function DefaultsSection() {
           placeholder="You are a helpful assistant…"
           className="min-h-24"
         />
+      </div>
+      <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+        <div className="min-w-0 text-sm">
+          <div className="font-medium">Prompt library</div>
+          <div className="text-muted-foreground">
+            {prompts?.length ? `${prompts.length} saved` : 'Save prompts you reuse'} · type / to insert one
+          </div>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => openPromptLibrary()}>
+          Manage
+        </Button>
+      </div>
+    </Section>
+  )
+}
+
+const selectClass =
+  'h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
+
+function VoiceSection() {
+  const hasOpenAI = useSettings((s) => !!s.apiKeys.openai)
+  const speechInput = useSettings((s) => s.speechInput)
+  const speechOutput = useSettings((s) => s.speechOutput)
+  const speechVoice = useSettings((s) => s.speechVoice)
+  const speechLanguage = useSettings((s) => s.speechLanguage)
+  const setSpeech = useSettings((s) => s.setSpeech)
+  const readsWithOpenAI = resolveEngine(speechOutput, { browser: canSpeakInBrowser(), openai: hasOpenAI }) === 'openai'
+
+  return (
+    <Section
+      title="Voice"
+      description="Speak your messages with the mic button, and listen to replies. The browser's speech is free; OpenAI sounds more natural and is billed to your OpenAI key."
+    >
+      <EngineChoice
+        label="Voice input"
+        value={speechInput}
+        onChange={(speechInput) => setSpeech({ speechInput })}
+        browserSupported={!!browserRecognition()}
+        hasOpenAI={hasOpenAI}
+      />
+      <EngineChoice
+        label="Read aloud"
+        value={speechOutput}
+        onChange={(speechOutput) => setSpeech({ speechOutput })}
+        browserSupported={canSpeakInBrowser()}
+        hasOpenAI={hasOpenAI}
+      />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-2">
+          <Label htmlFor="speech-language">Language</Label>
+          <select
+            id="speech-language"
+            value={speechLanguage}
+            onChange={(e) => setSpeech({ speechLanguage: e.target.value })}
+            className={selectClass}
+          >
+            <option value="">Same as browser</option>
+            {SPEECH_LANGUAGES.map((l) => (
+              <option key={l.tag} value={l.tag}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        {readsWithOpenAI && (
+          <div className="grid gap-2">
+            <Label htmlFor="speech-voice">OpenAI voice</Label>
+            <select
+              id="speech-voice"
+              value={speechVoice}
+              onChange={(e) => setSpeech({ speechVoice: e.target.value })}
+              className={cn(selectClass, 'capitalize')}
+            >
+              {OPENAI_VOICES.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+    </Section>
+  )
+}
+
+function EngineChoice({
+  label,
+  value,
+  onChange,
+  browserSupported,
+  hasOpenAI,
+}: {
+  label: string
+  value: SpeechEngine
+  onChange: (engine: SpeechEngine) => void
+  browserSupported: boolean
+  hasOpenAI: boolean
+}) {
+  const id = useId()
+  const options: { engine: SpeechEngine; name: string; note: string | null }[] = [
+    { engine: 'browser', name: 'Browser', note: browserSupported ? null : 'Not supported here' },
+    { engine: 'openai', name: 'OpenAI', note: hasOpenAI ? null : 'Needs an OpenAI key' },
+  ]
+  // Show what will actually be used when the saved choice isn't available.
+  const effective = resolveEngine(value, { browser: browserSupported, openai: hasOpenAI })
+  return (
+    <div className="grid gap-2">
+      <Label id={id}>{label}</Label>
+      <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-labelledby={id}>
+        {options.map(({ engine, name, note }) => (
+          <Button
+            key={engine}
+            variant="outline"
+            role="radio"
+            aria-checked={effective === engine}
+            disabled={note !== null}
+            onClick={() => onChange(engine)}
+            className={cn('h-auto flex-col gap-0 py-2', effective === engine && 'border-foreground')}
+          >
+            {name}
+            {note && <span className="text-xs font-normal text-muted-foreground">{note}</span>}
+          </Button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function UsageSection() {
+  const showUsage = useSettings((s) => s.showUsageInSidebar)
+  const budget = useSettings((s) => s.monthlyBudget)
+  const setUsagePrefs = useSettings((s) => s.setUsagePrefs)
+  const setSettingsOpen = useUI((s) => s.setSettingsOpen)
+  const navigate = useNavigate()
+  const [budgetText, setBudgetText] = useState(budget === null ? '' : String(budget))
+
+  function saveBudget(text: string) {
+    const value = Number(text.replace(',', '.'))
+    setUsagePrefs({ monthlyBudget: text.trim() && Number.isFinite(value) && value > 0 ? value : null })
+  }
+
+  return (
+    <Section title="Usage" description="Spend, tokens and speed, worked out from your chats in this browser.">
+      <div className="flex items-center justify-between gap-4">
+        <Label htmlFor="show-usage" className="font-normal">
+          Show this month's usage in the sidebar
+        </Label>
+        <Switch id="show-usage" checked={showUsage} onCheckedChange={(on) => setUsagePrefs({ showUsageInSidebar: on })} />
+      </div>
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="grid gap-2">
+          <Label htmlFor="monthly-budget">Monthly budget</Label>
+          <div className="relative">
+            <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-sm text-muted-foreground">
+              $
+            </span>
+            <Input
+              id="monthly-budget"
+              inputMode="decimal"
+              value={budgetText}
+              onChange={(e) => setBudgetText(e.target.value)}
+              onBlur={(e) => saveBudget(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && saveBudget(e.currentTarget.value)}
+              placeholder="None"
+              className="w-32 pl-6"
+            />
+          </div>
+        </div>
+        <Button
+          variant="outline"
+          onClick={() => {
+            setSettingsOpen(false)
+            navigate('/usage')
+          }}
+        >
+          Open usage dashboard
+        </Button>
       </div>
     </Section>
   )
@@ -272,7 +466,8 @@ function DataSection() {
     try {
       const result = await importData(JSON.parse(await file.text()))
       const projects = result.projects ? `${result.projects} projects, ` : ''
-      toast.success(`Imported ${projects}${result.conversations} chats and ${result.messages} messages`)
+      const prompts = result.prompts ? `, ${result.prompts} prompts` : ''
+      toast.success(`Imported ${projects}${result.conversations} chats and ${result.messages} messages${prompts}`)
     } catch (err) {
       toast.error(err instanceof SyntaxError ? 'That file is not valid JSON.' : (err as Error).message)
     }
@@ -325,7 +520,8 @@ function DataSection() {
             <AlertDialogHeader>
               <AlertDialogTitle>Delete all chats?</AlertDialogTitle>
               <AlertDialogDescription>
-                Every chat in this browser will be permanently deleted. Export first if you want a backup.
+                Every chat, project and saved prompt in this browser will be permanently deleted. Export first if you
+                want a backup.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

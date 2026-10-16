@@ -2,11 +2,19 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { db, type Conversation } from './db'
 import {
   addMessage,
+  addProjectFiles,
   createConversation,
+  createPrompt,
+  deletePrompt,
+  listPrompts,
+  removeProjectFile,
+  searchChats,
+  updatePrompt,
   createProject,
   deleteProject,
   getProject,
   listProjects,
+  saveBlob,
   updateConversation,
   updateProject,
   deleteConversation,
@@ -23,6 +31,8 @@ import {
 } from './repo'
 
 beforeEach(async () => {
+  await db.prompts.clear()
+  await db.blobs.clear()
   await db.projects.clear()
   await db.conversations.clear()
   await db.messages.clear()
@@ -96,6 +106,14 @@ describe('projects', () => {
     expect(await getProject(a.id)).toMatchObject({ name: 'Alpha 2', instructions: 'Be brief.' })
   })
 
+  it('adds and removes project files', async () => {
+    const p = await createProject({ name: 'Docs' })
+    const file = (id: string) => ({ id, kind: 'file' as const, name: `${id}.md`, mimeType: 'text/markdown', size: 4, text: id, blobId: null })
+    await addProjectFiles(p.id, [file('a'), file('b')])
+    await removeProjectFile(p.id, 'a')
+    expect((await getProject(p.id))?.files.map((f) => f.name)).toEqual(['b.md'])
+  })
+
   it('deleting a project keeps its chats and moves them out', async () => {
     const p = await createProject({ name: 'Temp', instructions: 'secret' })
     const chat = await createConversation({ model: 'm', systemPrompt: '', projectId: p.id })
@@ -104,6 +122,36 @@ describe('projects', () => {
     expect(await listProjects()).toEqual([])
     expect((await db.projects.get(p.id))?.instructions).toBe('')
     expect((await getConversation(chat.id))?.projectId).toBeNull()
+  })
+})
+
+describe('saved prompts', () => {
+  it('creates, lists by title, edits and deletes prompts', async () => {
+    const b = await createPrompt({ title: 'translate', content: 'Translate to {{language}}:' })
+    const a = await createPrompt({ title: ' Summarize ', content: 'Summarize:' })
+    expect((await listPrompts()).map((p) => p.title)).toEqual(['Summarize', 'translate'])
+    await updatePrompt(a.id, { content: 'Summarize briefly:' })
+    await deletePrompt(b.id)
+    expect(await listPrompts()).toMatchObject([{ title: 'Summarize', content: 'Summarize briefly:' }])
+    expect(await db.prompts.get(b.id)).toMatchObject({ title: '', content: '' })
+  })
+})
+
+describe('searchChats', () => {
+  it('finds titles and message text regardless of case and accents, newest first', async () => {
+    const older = await createConversation({ model: 'm', systemPrompt: '', title: 'Du lịch Việt Nam' })
+    const newer = await createConversation({ model: 'm', systemPrompt: '', title: 'Recipes' })
+    await addMessage({ conversationId: newer.id, role: 'user', content: 'How do I cook phở?' })
+    const reply = await addMessage({ conversationId: newer.id, role: 'assistant', content: 'Start with a VIỆT broth.' })
+    const gone = await createConversation({ model: 'm', systemPrompt: '', title: 'viet notes' })
+    await deleteConversation(gone.id)
+
+    const results = await searchChats('viet')
+    expect(results.map((r) => r.conversation.id)).toEqual([newer.id, older.id])
+    expect(results[0]).toMatchObject({ title: null, message: { id: reply.id, match: { match: 'VIỆT' } } })
+    expect(results[1].title).toEqual({ before: 'Du lịch ', match: 'Việt', after: ' Nam' })
+    expect(await searchChats('pho')).toMatchObject([{ message: { match: { before: 'How do I cook ', match: 'phở' } } }])
+    expect(await searchChats('   ')).toEqual([])
   })
 })
 
@@ -116,11 +164,16 @@ describe('export / import', () => {
 
     await db.conversations.clear()
     await db.messages.clear()
-    expect(await importData(JSON.parse(JSON.stringify(file)))).toEqual({ projects: 0, conversations: 1, messages: 1 })
+    expect(await importData(JSON.parse(JSON.stringify(file)))).toEqual({
+      projects: 0,
+      conversations: 1,
+      messages: 1,
+      prompts: 0,
+    })
     expect((await getMessages(c.id)).map((m) => m.content)).toEqual(['hello'])
 
     // Re-importing the same (not newer) data changes nothing.
-    expect(await importData(file)).toEqual({ projects: 0, conversations: 0, messages: 0 })
+    expect(await importData(file)).toEqual({ projects: 0, conversations: 0, messages: 0, prompts: 0 })
   })
 
   it('round-trips projects and accepts exports from before projects existed', async () => {
@@ -139,6 +192,40 @@ describe('export / import', () => {
     expect((await getConversation('old'))?.projectId).toBeNull()
   })
 
+  it('round-trips prompts and project files', async () => {
+    const p = await createProject({ name: 'Docs' })
+    const doc = { id: 'f', kind: 'file' as const, name: 'brief.md', mimeType: 'text/markdown', size: 5, text: 'brief', blobId: null }
+    await addProjectFiles(p.id, [doc])
+    await createPrompt({ title: 'Fix grammar', content: 'Fix the grammar:' })
+    const file = JSON.parse(JSON.stringify(await exportData()))
+    await db.projects.clear()
+    await db.prompts.clear()
+
+    expect(await importData(file)).toMatchObject({ projects: 1, prompts: 1 })
+    expect((await getProject(p.id))?.files).toEqual([doc])
+    expect(await listPrompts()).toMatchObject([{ title: 'Fix grammar', content: 'Fix the grammar:' }])
+  })
+
+  it('round-trips attached images', async () => {
+    const c = await createConversation({ model: 'm', systemPrompt: '' })
+    const blobId = await saveBlob(new Uint8Array([9, 8, 7]).buffer, 'image/png')
+    await addMessage({
+      conversationId: c.id,
+      role: 'user',
+      content: 'look',
+      attachments: [{ id: 'a', kind: 'image', name: 'x.png', mimeType: 'image/png', size: 3, text: '', blobId }],
+    })
+    const file = JSON.parse(JSON.stringify(await exportData()))
+    expect(file.blobs).toEqual([{ id: blobId, mimeType: 'image/png', data: 'CQgH' }])
+
+    await db.blobs.clear()
+    await db.messages.clear()
+    await importData(file)
+    const blob = await db.blobs.get(blobId)
+    expect(Array.from(new Uint8Array(blob!.data))).toEqual([9, 8, 7])
+    expect((await getMessages(c.id))[0].attachments[0]).toMatchObject({ name: 'x.png', blobId })
+  })
+
   it('rejects files that are not aimvp exports', async () => {
     await expect(importData({ foo: 1 })).rejects.toThrow(/not an aimvp export/)
   })
@@ -150,8 +237,9 @@ describe('export / import', () => {
       exportedAt: 0,
       conversations: [{ id: 'x' }],
       messages: [{ id: 'y', role: 'system' }],
+      prompts: [{ id: 'z', title: 'no content' }],
     })
-    expect(result).toEqual({ projects: 0, conversations: 0, messages: 0 })
+    expect(result).toEqual({ projects: 0, conversations: 0, messages: 0, prompts: 0 })
   })
 })
 

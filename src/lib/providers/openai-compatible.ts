@@ -1,11 +1,58 @@
 import { readSSE } from '@/lib/sse'
 import { httpError, readErrorBody, type ApiErrorBody } from './errors'
-import type { ProviderId, StreamEvent } from './types'
+import {
+  documentAsText,
+  parseDataUrl,
+  toSource,
+  type ChatMessage,
+  type ProviderId,
+  type Source,
+  type StreamEvent,
+} from './types'
+
+/**
+ * A web citation on a reply. Chat Completions nests the link in `url_citation`;
+ * the Responses API puts it on the annotation itself.
+ */
+export type Annotation = { type?: string; url?: string; title?: string; url_citation?: { url?: string; title?: string } }
+
+export function sourcesOf(annotations: Annotation[] | undefined): Source[] {
+  return (annotations ?? []).flatMap((a) => {
+    if (a.type !== 'url_citation') return []
+    const link = a.url_citation ?? a
+    return toSource(link.url, link.title) ?? []
+  })
+}
 
 interface ChunkPayload {
   error?: ApiErrorBody
-  choices?: { delta?: { content?: string | null; reasoning?: string | null } }[]
+  choices?: {
+    delta?: {
+      content?: string | null
+      reasoning?: string | null
+      /** Generated images (OpenRouter image models). */
+      images?: { image_url?: { url?: string } }[]
+      /** Web citations (OpenRouter web search). */
+      annotations?: Annotation[]
+    }
+    message?: { annotations?: Annotation[] }
+  }[]
   usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number }
+}
+
+/** Chat Completions messages: images as data URLs; documents as their extracted text. */
+export function toChatCompletionsMessages(messages: ChatMessage[]) {
+  return messages.map((m) => ({
+    role: m.role,
+    content:
+      typeof m.content === 'string'
+        ? m.content
+        : m.content.map((p) => {
+            if (p.type === 'image') return { type: 'image_url', image_url: { url: `data:${p.mimeType};base64,${p.data}` } }
+            if (p.type === 'document') return { type: 'text', text: documentAsText(p.name, p.text) }
+            return { type: 'text', text: p.text }
+          }),
+  }))
 }
 
 /** Maps a provider's error status (and body) onto the statuses `httpError` understands. */
@@ -49,6 +96,12 @@ export async function* streamChatCompletions(opts: {
     const delta = chunk.choices?.[0]?.delta
     if (delta?.reasoning) yield { type: 'reasoning', text: delta.reasoning }
     if (delta?.content) yield { type: 'content', text: delta.content }
+    for (const image of delta?.images ?? []) {
+      const parsed = parseDataUrl(image.image_url?.url ?? '')
+      if (parsed) yield { type: 'image', ...parsed }
+    }
+    const sources = sourcesOf(delta?.annotations ?? chunk.choices?.[0]?.message?.annotations)
+    if (sources.length) yield { type: 'sources', sources }
     if (chunk.usage) {
       yield {
         type: 'usage',

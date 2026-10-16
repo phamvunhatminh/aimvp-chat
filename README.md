@@ -10,9 +10,19 @@ your chats never touch an aimvp server.
   Anthropic and Google Gemini
 - Model picker grouped by provider, with search, OpenRouter pricing and favorites
 - Streaming replies with stop, regenerate, edit-and-resend, and "thinking" output for reasoning models
-- Markdown, tables and syntax-highlighted code with copy buttons
-- Chat history and projects stored in the browser (IndexedDB), with search, rename, delete, and JSON export/import
-- Projects: folders for chats with shared instructions, created in one step from the sidebar; move chats in and out
+- Markdown, tables and syntax-highlighted code with copy and download buttons
+- Attach images, PDFs, Word, Excel and text/code files (paste, drop or pick); PDFs go natively to Claude and
+  Gemini, as extracted text elsewhere
+- Image generation with image models (OpenRouter, OpenAI gpt-image/DALL·E, Gemini image models)
+- Web search per chat, with cited sources (each provider's own search tool)
+- Voice input (browser speech recognition or OpenAI transcription) and read aloud (browser voices or OpenAI TTS)
+- Prompt library: save prompts and insert them with `/` in the composer; `{{blanks}}` are selected to fill in
+- Chat history and projects stored in the browser (IndexedDB), with rename, delete, and JSON export/import
+- Search across chat titles and message text, ignoring accents ("ha noi" finds "Hà Nội"), jumping to the match
+- Projects: folders for chats with shared instructions and files, created in one step from the sidebar
+- Download a chat as Markdown, or print / save it as PDF
+- Usage dashboard: spend (exact for OpenRouter, estimated otherwise), tokens, speed, per day / provider / model /
+  project / chat, a monthly budget, and an optional summary in the sidebar
 - System prompt per chat, plus a default for new chats
 - "Connect OpenRouter" sign-in (OAuth PKCE), or paste any provider's key
 - Light/dark theme, installable PWA, works well on phones
@@ -21,7 +31,7 @@ your chats never touch an aimvp server.
 
 ```
 Browser (React SPA)
- ├─ IndexedDB (Dexie)    conversations, messages
+ ├─ IndexedDB (Dexie)    projects, conversations, messages, file blobs, saved prompts
  ├─ localStorage         settings + the user's API keys
  └─ streaming requests ─┬─► openrouter.ai                       (Chat Completions)
                         ├─► api.openai.com                      (Chat Completions)
@@ -42,6 +52,10 @@ server (e.g. Cloudflare D1) without a schema rewrite.
 | `src/lib/oauth.ts`         | OpenRouter OAuth PKCE flow                             |
 | `src/lib/db.ts`, `repo.ts` | IndexedDB schema and all reads/writes                  |
 | `src/lib/chat.ts`          | Send / stream / stop / regenerate / edit orchestration |
+| `src/lib/files.ts`         | Reading attachments: image downscaling, PDF/Word/Excel text |
+| `src/lib/speech.ts`, `read-aloud.ts` | Voice input and read-aloud helpers           |
+| `src/lib/search.ts`        | Accent-insensitive matching for chat search            |
+| `src/lib/usage.ts`, `pricing.ts` | Usage stats and cost estimates                   |
 | `src/stores/`              | Zustand stores: settings, model catalog, UI, streams   |
 | `src/components/`          | UI (shadcn-style components on Radix + Tailwind v4)    |
 | `public/_headers`          | Security headers (CSP etc.) served by Cloudflare       |
@@ -91,12 +105,18 @@ No secrets or environment variables are needed: the app holds no keys of its own
   "Connect OpenRouter" can be capped or revoked by the user at openrouter.ai/settings/keys.
 - The main risk to a browser-held key is XSS, so: a strict CSP (`connect-src` allows only the four provider
   APIs), no third-party scripts or analytics, model output rendered without raw HTML, and remote images in model output
-  shown as links (never fetched, so a prompt injection can't leak the chat through an image URL).
+  shown as links (never fetched, so a prompt injection can't leak the chat through an image URL). Web search sources
+  are kept only if they are http(s) links.
+- Files are read in the browser and sent only to the chosen model's provider. The microphone is allowed for this
+  origin only (`Permissions-Policy`), and only while the mic button is on.
+- Browser speech recognition (Chrome, Edge, Safari) is run by the browser vendor's speech service; pick OpenAI in
+  Settings → Voice to keep speech with your own key instead.
+- Cost estimates for OpenAI, Anthropic and Gemini use OpenRouter's public model list, fetched without any key.
 - Chats live in the browser. The app asks for persistent storage; installing it as a PWA and exporting
   backups protects history from browser eviction (notably Safari).
 
 ## Roadmap
 
 - Accounts and multi-device sync (Cloudflare D1, reusing the current schema)
-- File uploads (R2) and chat with documents (Vectorize)
+- Large document collections with retrieval (R2 + Vectorize)
 - Sharing conversations

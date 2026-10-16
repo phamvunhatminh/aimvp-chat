@@ -109,6 +109,12 @@ export function useModelGroups(): ModelGroup[] {
   })
 }
 
+/** Catalog entry for a model reference, if its provider's list has loaded. */
+export function useModelInfo(ref: string): ModelInfo | undefined {
+  const { provider, model } = parseModelRef(ref)
+  return useModelCatalog((s) => s.byProvider[provider]?.models.find((m) => m.id === model))
+}
+
 /** Display name for a model reference, falling back to its id. */
 export function useModelName(ref: string): string {
   const { provider, model } = parseModelRef(ref)

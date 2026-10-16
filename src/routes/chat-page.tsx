@@ -1,5 +1,6 @@
-import { useEffect } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { GlobeIcon, PaperclipIcon } from 'lucide-react'
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { ChatHeader } from '@/components/chat/chat-header'
 import { Composer } from '@/components/chat/composer'
 import { MessageList } from '@/components/chat/message-list'
@@ -9,9 +10,18 @@ import { ProjectOverview } from '@/components/project-overview'
 import { Button } from '@/components/ui/button'
 import { useConversation, useMessages, useProject } from '@/hooks/use-data'
 import { sendMessage, stopStreaming } from '@/lib/chat'
+import { downloadFile } from '@/lib/download'
+import { conversationToMarkdown, slugify } from '@/lib/export-chat'
+import type { PreparedFile } from '@/lib/files'
 import { parseModelRef, PROVIDERS } from '@/lib/providers'
+import { stopReading } from '@/lib/read-aloud'
 import { createConversation, updateConversation } from '@/lib/repo'
-import { useModelName } from '@/stores/models'
+import { cn } from '@/lib/utils'
+import { usePriceLookup } from '@/hooks/use-usage'
+import { formatCost, formatTokens } from '@/lib/format'
+import { chatTotals } from '@/lib/usage'
+import { useModelInfo, useModelName } from '@/stores/models'
+import { addFiles } from '@/stores/composer'
 import { connectedProviders, useSettings } from '@/stores/settings'
 import { useIsStreaming } from '@/stores/streams'
 import { useUI } from '@/stores/ui'
@@ -36,12 +46,18 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
   const setDraft = useUI((s) => s.setDraft)
   const resetDraft = useUI((s) => s.resetDraft)
   const streaming = useIsStreaming(id)
+  const modelInfo = useModelInfo(conversation?.model ?? draft.model ?? defaultModel)
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const price = usePriceLookup()
 
   useEffect(() => {
     const name = conversation?.title ?? (newChatProjectId ? project?.name : undefined)
     document.title = name ? `${name} · aimvp` : 'aimvp'
   }, [conversation, project, newChatProjectId])
+
+  // Stop reading a reply aloud when leaving its chat.
+  useEffect(() => stopReading, [])
 
   if (id && conversation === null) return <NotFound what="Chat" />
   if (newChatProjectId && project === null) return <NotFound what="Project" />
@@ -51,23 +67,26 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
 
   const model = conversation?.model ?? draft.model ?? defaultModel
   const systemPrompt = conversation?.systemPrompt ?? draft.systemPrompt ?? defaultSystemPrompt
+  const webSearch = conversation ? !!conversation.webSearch : draft.webSearch
+  const canSearch = !modelInfo?.outputs?.image && modelInfo?.webSearch !== false
   const hasMessages = !!messages && messages.length > 0
   const hasAnyKey = connectedProviders(apiKeys).length > 0
+  const totals = messages ? chatTotals(messages, price) : null
   const needsKey = hasAnyKey && !apiKeys[parseModelRef(model).provider]
 
-  async function handleSend(text: string) {
+  async function handleSend(text: string, files: PreparedFile[]) {
     if (conversation) {
-      void sendMessage(conversation.id, text)
+      void sendMessage(conversation.id, text, files)
       return
     }
-    const created = await createConversation({ model, systemPrompt, projectId: newChatProjectId ?? null })
+    const created = await createConversation({ model, systemPrompt, webSearch, projectId: newChatProjectId ?? null })
     resetDraft()
     navigate(`/c/${created.id}`)
-    void sendMessage(created.id, text)
+    void sendMessage(created.id, text, files)
   }
 
   return (
-    <>
+    <FileDropZone enabled={hasAnyKey}>
       <ChatHeader
         model={model}
         onModelChange={(next) =>
@@ -81,10 +100,22 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
         }
         // The project page already shows its name, so the header link is for chats in it.
         project={newChatProjectId ? null : project}
+        usageNote={totals ? usageNote(totals) : undefined}
+        onDownloadMarkdown={
+          conversation && hasMessages
+            ? () =>
+                downloadFile(
+                  conversationToMarkdown(conversation, messages),
+                  `${slugify(conversation.title)}.md`,
+                  'text/markdown',
+                )
+            : undefined
+        }
       />
+      {conversation && <h1 className="mx-auto hidden w-full max-w-3xl px-4 pb-4 text-2xl font-semibold print:block">{conversation.title}</h1>}
 
       {hasMessages ? (
-        <MessageList messages={messages} busy={streaming} />
+        <MessageList messages={messages} busy={streaming} focusMessageId={searchParams.get('m')} />
       ) : project && newChatProjectId ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <ProjectOverview project={project} />
@@ -98,15 +129,105 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
       {needsKey && <MissingKeyNotice modelRef={model} />}
       {hasAnyKey ? (
         <Composer
-          onSend={(text) => void handleSend(text)}
+          onSend={(text, files) => void handleSend(text, files)}
           onStop={() => id && stopStreaming(id)}
           streaming={streaming}
-          placeholder={project && newChatProjectId ? `New chat in ${project.name}…` : undefined}
+          modelRef={model}
+          tools={
+            canSearch && (
+              <WebSearchToggle
+                on={webSearch}
+                onChange={(next) =>
+                  conversation
+                    ? void updateConversation(conversation.id, { webSearch: next })
+                    : setDraft({ webSearch: next })
+                }
+              />
+            )
+          }
+          placeholder={
+            modelInfo?.outputs?.image
+              ? 'Describe the image you want…'
+              : project && newChatProjectId
+                ? `New chat in ${project.name}…`
+                : undefined
+          }
         />
       ) : (
         (hasMessages || newChatProjectId) && <ReconnectBar />
       )}
-    </>
+    </FileDropZone>
+  )
+}
+
+/** "~$0.02 · 12k tokens", or nothing before the chat has used any. */
+function usageNote({ tokens, cost, estimated }: ReturnType<typeof chatTotals>): string | undefined {
+  if (tokens === 0) return undefined
+  const spend = cost > 0 ? `${estimated ? '~' : ''}${formatCost(cost)} · ` : ''
+  return `${spend}${formatTokens(tokens)} tokens`
+}
+
+/** Lets the model search the web for this chat's replies. */
+function WebSearchToggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size={on ? 'sm' : 'icon'}
+      aria-pressed={on}
+      aria-label="Search the web"
+      onClick={() => onChange(!on)}
+      title={on ? 'Web search is on' : 'Search the web'}
+      className={cn(
+        'rounded-full',
+        on
+          ? 'h-9 bg-sky-500/10 px-3 text-sky-700 hover:bg-sky-500/15 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-400'
+          : 'text-muted-foreground',
+      )}
+    >
+      <GlobeIcon />
+      {on && 'Search'}
+    </Button>
+  )
+}
+
+/** Lets files be dropped anywhere on the chat to attach them. */
+function FileDropZone({ enabled, children }: { enabled: boolean; children: ReactNode }) {
+  const [dragging, setDragging] = useState(false)
+  const depth = useRef(0)
+  const hasFiles = (e: DragEvent) => enabled && e.dataTransfer.types.includes('Files')
+
+  return (
+    <div
+      className="relative flex min-h-0 flex-1 flex-col"
+      onDragEnter={(e) => {
+        if (!hasFiles(e)) return
+        depth.current++
+        setDragging(true)
+      }}
+      onDragOver={(e) => {
+        if (hasFiles(e)) e.preventDefault()
+      }}
+      onDragLeave={() => {
+        depth.current = Math.max(0, depth.current - 1)
+        if (depth.current === 0) setDragging(false)
+      }}
+      onDrop={(e) => {
+        if (!hasFiles(e)) return
+        e.preventDefault()
+        depth.current = 0
+        setDragging(false)
+        void addFiles(e.dataTransfer.files)
+      }}
+    >
+      {children}
+      {dragging && (
+        <div className="pointer-events-none absolute inset-2 z-40 flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-ring bg-background/90 text-sm font-medium">
+          <PaperclipIcon className="size-6" />
+          Drop images or files to attach
+        </div>
+      )}
+    </div>
   )
 }
 

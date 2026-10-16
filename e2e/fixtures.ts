@@ -1,10 +1,26 @@
 import { test as base, expect, type BrowserContext, type Page } from '@playwright/test'
+import { makePng, makeWav } from './files'
 
 export const MODELS = [
   { id: 'openrouter/auto', name: 'Auto Router', pricing: { prompt: '-1', completion: '-1' } },
-  { id: 'anthropic/claude-test', name: 'Anthropic: Claude Test', pricing: { prompt: '0.000003', completion: '0.000015' } },
+  {
+    id: 'anthropic/claude-test',
+    name: 'Anthropic: Claude Test',
+    pricing: { prompt: '0.000003', completion: '0.000015' },
+    architecture: { input_modalities: ['text', 'image', 'file'], output_modalities: ['text'] },
+  },
+  {
+    id: 'text/only',
+    name: 'Text Only Model',
+    architecture: { input_modalities: ['text'], output_modalities: ['text'] },
+  },
+  {
+    id: 'img/painter',
+    name: 'Painter',
+    architecture: { input_modalities: ['text', 'image'], output_modalities: ['image', 'text'] },
+  },
   { id: 'openai/broke', name: 'OpenAI: Out Of Credits', pricing: { prompt: '0.00000015', completion: '0.0000006' } },
-  { id: 'image/only', name: 'Image Only', architecture: { output_modalities: ['image'] } },
+  { id: 'audio/only', name: 'Audio Only', architecture: { output_modalities: ['audio'] } },
 ]
 
 export const ANSWER = [
@@ -19,17 +35,25 @@ export const ANSWER = [
   '<script>window.__pwned = true</script>',
 ].join('\n')
 
+export const SEARCH_ANSWER = 'Here is what the web says.'
+
 export const OAUTH_KEY = 'sk-or-v1-oauth-0123456789'
+
+/** What the mocked image model "paints". */
+export const PAINTED_PNG = makePng(32, 32, [30, 90, 220])
 
 export interface OpenRouterMock {
   /** Parsed JSON bodies of chat completion requests, in order. */
   chatRequests: Record<string, unknown>[]
   keyExchanges: number
+  /** OpenAI speech-to-text and text-to-speech requests. */
+  audioRequests: { path: string; body: string }[]
   /** Chat requests sent straight to OpenAI, Anthropic or Google. */
   directRequests: { provider: string; url: string; headers: Record<string, string>; body: Record<string, unknown> }[]
 }
 
 export const DIRECT_ANSWER = 'Hello from a direct provider'
+export const TRANSCRIPT = 'Words from the microphone'
 
 function sse(text: string): string {
   let body = ': OPENROUTER PROCESSING\n\n'
@@ -79,6 +103,11 @@ async function mockDirectProviders(context: BrowserContext, mock: OpenRouterMock
     const path = new URL(request.url()).pathname
     if (path === '/v1/models') {
       return route.fulfill({ json: { data: [{ id: 'gpt-5', created: 2 }, { id: 'whisper-1', created: 1 }] }, headers })
+    }
+    if (path.startsWith('/v1/audio/')) {
+      mock.audioRequests.push({ path, body: request.postDataBuffer()?.toString('latin1') ?? '' })
+      if (path === '/v1/audio/transcriptions') return route.fulfill({ json: { text: TRANSCRIPT }, headers })
+      return route.fulfill({ body: makeWav(300), headers: { ...headers, 'Content-Type': 'audio/wav' } })
     }
     record('openai', request)
     const body = `data: ${JSON.stringify({ choices: [{ delta: { content: DIRECT_ANSWER } }] })}\n\n`
@@ -130,7 +159,7 @@ async function mockDirectProviders(context: BrowserContext, mock: OpenRouterMock
 }
 
 async function mockOpenRouter(context: BrowserContext): Promise<OpenRouterMock> {
-  const mock: OpenRouterMock = { chatRequests: [], keyExchanges: 0, directRequests: [] }
+  const mock: OpenRouterMock = { chatRequests: [], keyExchanges: 0, audioRequests: [], directRequests: [] }
   await mockDirectProviders(context, mock)
   const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' }
 
@@ -147,6 +176,31 @@ async function mockOpenRouter(context: BrowserContext): Promise<OpenRouterMock> 
     if (path === '/api/v1/chat/completions') {
       const body = request.postDataJSON()
       mock.chatRequests.push(body)
+      if (body.model === 'img/painter') {
+        const image = `data:image/png;base64,${PAINTED_PNG.toString('base64')}`
+        const chunk = { choices: [{ delta: { content: 'A blue square.', images: [{ image_url: { url: image } }] } }] }
+        return route.fulfill({
+          body: `data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`,
+          headers: { ...headers, 'Content-Type': 'text/event-stream' },
+        })
+      }
+      if (body.tools?.some((t: { type: string }) => t.type === 'openrouter:web_search')) {
+        const cite = (url: string, title: string) => ({ type: 'url_citation', url_citation: { url, title } })
+        const chunk = {
+          choices: [
+            {
+              delta: {
+                content: SEARCH_ANSWER,
+                annotations: [cite('https://news.example/today', 'Today in news'), cite('https://wiki.example/x', 'Wiki X')],
+              },
+            },
+          ],
+        }
+        return route.fulfill({
+          body: `data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`,
+          headers: { ...headers, 'Content-Type': 'text/event-stream' },
+        })
+      }
       if (body.model === 'openai/broke') {
         return route.fulfill({ status: 402, json: { error: { code: 402, message: 'Insufficient credits' } }, headers })
       }
@@ -178,6 +232,15 @@ export async function openWithKey(page: Page, path = '/') {
       JSON.stringify({ state: { apiKey: 'sk-or-v1-test-0123456789', theme: 'light' }, version: 1 }),
     )
   })
+  await page.goto(path)
+}
+
+/** Starts the app with these settings (current format) already saved. */
+export async function openWithSettings(page: Page, state: Record<string, unknown>, path = '/') {
+  await page.addInitScript((state) => {
+    if (localStorage.getItem('aimvp.settings')) return
+    localStorage.setItem('aimvp.settings', JSON.stringify({ state: { theme: 'light', ...state }, version: 2 }))
+  }, state)
   await page.goto(path)
 }
 

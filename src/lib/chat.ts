@@ -3,23 +3,32 @@ import { findModel } from '@/stores/models'
 import { useSettings } from '@/stores/settings'
 import { useStreams } from '@/stores/streams'
 import { useUI } from '@/stores/ui'
-import type { Message } from './db'
+import { base64ToBytes, bytesToBase64 } from './base64'
+import type { Attachment, Message } from './db'
+import type { PreparedFile } from './files'
 import {
+  documentAsText,
   loadProvider,
+  makesImages,
   parseModelRef,
   ProviderError,
   PROVIDERS,
   type ChatMessage,
+  type ContentPart,
+  type Source,
   type Usage,
 } from './providers'
+import { newId } from './utils'
 import {
   addMessage,
   deleteMessages,
   deriveTitle,
+  getBlob,
   getConversation,
   getMessages,
   getProject,
   NEW_CHAT_TITLE,
+  saveBlob,
   updateConversation,
   updateMessage,
 } from './repo'
@@ -27,17 +36,56 @@ import {
 const UI_FLUSH_MS = 50
 const PERSIST_MS = 1000
 
-/** Project instructions first, then the chat's own system prompt; blank parts are dropped. */
-export function buildPrompt(systemPrompts: string[], history: Message[]): ChatMessage[] {
+async function toContentPart(a: Attachment): Promise<ContentPart> {
+  const blob = a.blobId ? await getBlob(a.blobId) : undefined
+  if (a.kind === 'image') {
+    return blob
+      ? { type: 'image', mimeType: blob.mimeType, data: bytesToBase64(blob.data) }
+      : { type: 'text', text: `[Image "${a.name}" is no longer available.]` }
+  }
+  if (a.mimeType === 'application/pdf' && blob) {
+    return { type: 'document', name: a.name, data: bytesToBase64(blob.data), text: a.text }
+  }
+  return { type: 'text', text: documentAsText(a.name, a.text) }
+}
+
+/** A project's files as one section of the system prompt. */
+export function projectFilesPrompt(files: Attachment[]): string {
+  if (files.length === 0) return ''
+  const header = 'Project files, for reference in every chat of this project:'
+  return [header, ...files.map((f) => documentAsText(f.name, f.text))].join('\n\n')
+}
+
+/**
+ * The request messages: project instructions and files first, then the chat's own system
+ * prompt (blank parts dropped), then the history with each user message's files.
+ */
+export async function buildPrompt(systemPrompts: string[], history: Message[]): Promise<ChatMessage[]> {
   const messages: ChatMessage[] = []
   const system = systemPrompts.filter((p) => p.trim()).join('\n\n')
   if (system) messages.push({ role: 'system', content: system })
   for (const m of history) {
     // Failed or empty replies are shown to the user but never sent back to the model.
     if (m.role === 'assistant' && (m.status !== 'done' || !m.content)) continue
-    messages.push({ role: m.role, content: m.content })
+    if (m.role === 'assistant' || !m.attachments?.length) {
+      messages.push({ role: m.role, content: m.content })
+      continue
+    }
+    const parts = await Promise.all(m.attachments.map(toContentPart))
+    if (m.content) parts.push({ type: 'text', text: m.content })
+    messages.push({ role: 'user', content: parts })
   }
   return messages
+}
+
+/** Stores the files' bytes and returns their attachments. */
+async function saveAttachments(files: PreparedFile[]): Promise<Attachment[]> {
+  return Promise.all(
+    files.map(async ({ attachment, data }) => ({
+      ...attachment,
+      blobId: data ? await saveBlob(data, attachment.mimeType) : null,
+    })),
+  )
 }
 
 export function isStreaming(conversationId: string): boolean {
@@ -56,14 +104,15 @@ function requestPersistentStorage() {
   navigator.storage?.persist?.().catch(() => {})
 }
 
-export async function sendMessage(conversationId: string, text: string): Promise<void> {
+export async function sendMessage(conversationId: string, text: string, files: PreparedFile[] = []): Promise<void> {
   const conversation = await getConversation(conversationId)
   if (!conversation || isStreaming(conversationId)) return
   // A new message supersedes any failed reply above it.
   await deleteMessages(conversationId, (m) => m.status === 'error')
-  await addMessage({ conversationId, role: 'user', content: text })
+  const attachments = await saveAttachments(files)
+  await addMessage({ conversationId, role: 'user', content: text, attachments })
   if (conversation.title === NEW_CHAT_TITLE) {
-    await updateConversation(conversationId, { title: deriveTitle(text) })
+    await updateConversation(conversationId, { title: deriveTitle(text || (files[0]?.attachment.name ?? '')) })
   }
   requestPersistentStorage()
   await runCompletion(conversationId)
@@ -104,6 +153,10 @@ async function runCompletion(conversationId: string): Promise<void> {
   const providerName = PROVIDERS[provider].name
   const apiKey = useSettings.getState().apiKeys[provider]
 
+  const modelInfo = findModel(provider, model)
+  // Image models don't search; neither do models their provider says can't.
+  const webSearch = !!conversation.webSearch && !makesImages(modelInfo) && modelInfo?.webSearch !== false
+
   const controller = new AbortController()
   useStreams.setState((s) => ({ controllers: { ...s.controllers, [conversationId]: controller } }))
 
@@ -113,11 +166,20 @@ async function runCompletion(conversationId: string): Promise<void> {
     content: '',
     model: conversation.model,
     status: 'streaming',
+    webSearch,
   })
 
   let content = ''
   let reasoning = ''
   let usage: Usage | null = null
+  const images: Attachment[] = []
+  const sources: Source[] = []
+  const startedAt = performance.now()
+  let firstTokenAt: number | null = null
+  const timing = () => {
+    const end = performance.now()
+    return { firstTokenMs: Math.round((firstTokenAt ?? end) - startedAt), totalMs: Math.round(end - startedAt) }
+  }
   let flushTimer: ReturnType<typeof setTimeout> | null = null
   let lastPersist = Date.now()
 
@@ -135,14 +197,41 @@ async function runCompletion(conversationId: string): Promise<void> {
     const stream = client.streamChat({
       apiKey,
       model,
-      modelInfo: findModel(provider, model),
-      messages: buildPrompt([project?.instructions ?? '', conversation.systemPrompt], history),
+      modelInfo,
+      webSearch,
+      messages: await buildPrompt(
+        [project?.instructions ?? '', projectFilesPrompt(project?.files ?? []), conversation.systemPrompt],
+        history,
+      ),
       signal: controller.signal,
     })
     for await (const event of stream) {
+      if (firstTokenAt === null && event.type !== 'usage' && event.type !== 'sources') firstTokenAt = performance.now()
       if (event.type === 'content') content += event.text
       else if (event.type === 'reasoning') reasoning += event.text
-      else usage = event.usage
+      else if (event.type === 'usage') usage = event.usage
+      else if (event.type === 'sources') {
+        const fresh = event.sources.filter((s, i, all) => all.findIndex((x) => x.url === s.url) === i)
+        const added = fresh.filter((s) => !sources.some((x) => x.url === s.url))
+        if (added.length) {
+          sources.push(...added)
+          await updateMessage(reply.id, { sources: [...sources] })
+        }
+      } else {
+        // Generated images are saved right away and shown as soon as they arrive.
+        const bytes = base64ToBytes(event.data)
+        const ext = event.mimeType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'png'
+        images.push({
+          id: newId(),
+          kind: 'image',
+          name: `image-${images.length + 1}.${ext}`,
+          mimeType: event.mimeType,
+          size: bytes.byteLength,
+          text: '',
+          blobId: await saveBlob(bytes.buffer, event.mimeType),
+        })
+        await updateMessage(reply.id, { attachments: [...images] })
+      }
       flushTimer ??= setTimeout(flushDraft, UI_FLUSH_MS)
       // Save progress now and then so a closed tab keeps most of the reply.
       if (Date.now() - lastPersist > PERSIST_MS) {
@@ -151,12 +240,14 @@ async function runCompletion(conversationId: string): Promise<void> {
       }
     }
     flushDraft()
-    await updateMessage(reply.id, { content, reasoning, usage, status: 'done' })
+    await updateMessage(reply.id, { content, reasoning, usage, timing: timing(), status: 'done' })
   } catch (err) {
     flushDraft()
     if (controller.signal.aborted) {
       // Stopped by the user: keep whatever arrived, drop the reply if nothing did.
-      if (content || reasoning) await updateMessage(reply.id, { content, reasoning, usage, status: 'done' })
+      if (content || reasoning || images.length) {
+        await updateMessage(reply.id, { content, reasoning, usage, timing: timing(), status: 'done' })
+      }
       else await deleteMessages(conversationId, (m) => m.id === reply.id)
     } else {
       await updateMessage(reply.id, { content, reasoning, status: 'error', error: errorMessage(err, providerName) })

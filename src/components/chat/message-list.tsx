@@ -6,11 +6,30 @@ import { MessageItem } from './message-item'
 
 const STICK_THRESHOLD_PX = 80
 
-export function MessageList({ messages, busy }: { messages: Message[]; busy: boolean }) {
+/** How long to keep a message from search in view while the replies around it render. */
+const FOCUS_HOLD_MS = 1500
+
+export function MessageList({
+  messages,
+  busy,
+  focusMessageId,
+}: {
+  messages: Message[]
+  busy: boolean
+  /** A message to scroll to and highlight, e.g. a search result. */
+  focusMessageId?: string | null
+}) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
-  const stickToBottom = useRef(true)
+  const stickToBottom = useRef(!focusMessageId)
+  const focused = useRef({ id: focusMessageId, until: 0 })
   const [showJump, setShowJump] = useState(false)
+
+  const scrollToFocused = () => {
+    const el = focused.current.id ? document.getElementById(`m-${focused.current.id}`) : null
+    el?.scrollIntoView({ block: 'center' })
+    return el
+  }
 
   const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
     const el = scrollRef.current
@@ -22,7 +41,8 @@ export function MessageList({ messages, busy }: { messages: Message[]; busy: boo
     const content = contentRef.current
     if (!content) return
     const observer = new ResizeObserver(() => {
-      if (stickToBottom.current) scrollToBottom()
+      if (Date.now() < focused.current.until) scrollToFocused()
+      else if (stickToBottom.current) scrollToBottom()
     })
     observer.observe(content)
     return () => observer.disconnect()
@@ -37,11 +57,30 @@ export function MessageList({ messages, busy }: { messages: Message[]; busy: boo
     }
   }, [last?.id, last?.role])
 
+  // Opening a search result shows that message, briefly highlighted, while the replies around it render.
+  useLayoutEffect(() => {
+    focused.current = { id: focusMessageId, until: 0 }
+    const el = scrollToFocused()
+    if (!el) return
+    stickToBottom.current = false
+    focused.current.until = Date.now() + FOCUS_HOLD_MS
+    el.classList.remove('search-hit')
+    void el.offsetWidth // restarts the animation
+    el.classList.add('search-hit')
+  }, [focusMessageId])
+
   return (
-    <div className="relative min-h-0 flex-1">
+    <div className="relative min-h-0 flex-1 print:block">
       <div
         ref={scrollRef}
-        className="h-full overflow-y-auto overscroll-contain"
+        className="h-full overflow-y-auto overscroll-contain print:h-auto print:overflow-visible"
+        // Scrolling by hand ends the hold on a search result.
+        onWheel={() => {
+          focused.current.until = 0
+        }}
+        onTouchMove={() => {
+          focused.current.until = 0
+        }}
         onScroll={(e) => {
           const el = e.currentTarget
           const distance = el.scrollHeight - el.scrollTop - el.clientHeight
@@ -51,7 +90,9 @@ export function MessageList({ messages, busy }: { messages: Message[]; busy: boo
       >
         <div ref={contentRef} className="mx-auto flex max-w-3xl flex-col gap-6 px-4 pt-4 pb-8">
           {messages.map((m, i) => (
-            <MessageItem key={m.id} message={m} isLast={i === messages.length - 1} conversationBusy={busy} />
+            <div key={m.id} id={`m-${m.id}`} className="scroll-mt-4 rounded-2xl">
+              <MessageItem message={m} isLast={i === messages.length - 1} conversationBusy={busy} />
+            </div>
           ))}
         </div>
       </div>
@@ -59,7 +100,7 @@ export function MessageList({ messages, busy }: { messages: Message[]; busy: boo
         <Button
           variant="outline"
           size="icon"
-          className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full shadow-md"
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full shadow-md print:hidden"
           onClick={() => {
             stickToBottom.current = true
             scrollToBottom('smooth')

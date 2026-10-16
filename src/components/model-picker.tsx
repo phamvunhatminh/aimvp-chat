@@ -19,7 +19,7 @@ import { useSettings } from '@/stores/settings'
 interface PickerItem {
   ref: string
   provider: ProviderId
-  model: Pick<ModelInfo, 'id' | 'name' | 'pricing'>
+  model: Pick<ModelInfo, 'id' | 'name' | 'pricing' | 'outputs'>
 }
 
 /** A typed `provider:model` or OpenRouter `vendor/model` id the list doesn't have. */
@@ -178,13 +178,18 @@ function ModelItem({
   return (
     <Command.Item
       value={itemValue}
-      keywords={[item.model.name, item.model.id, providerName]}
+      keywords={[item.model.name, item.model.id, providerName, ...(item.model.outputs?.image ? ['image'] : [])]}
       onSelect={() => onSelect(item.ref)}
       className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-[selected=true]:bg-accent"
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="truncate">{item.model.name}</span>
+          {item.model.outputs?.image && (
+            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground uppercase">
+              Image
+            </span>
+          )}
           {item.ref === value && <CheckIcon className="size-3.5 shrink-0" />}
         </div>
         {details && <div className="truncate text-xs text-muted-foreground">{details}</div>}
