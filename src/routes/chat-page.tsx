@@ -8,9 +8,10 @@ import { Logo } from '@/components/logo'
 import { Button } from '@/components/ui/button'
 import { useConversation, useMessages } from '@/hooks/use-data'
 import { sendMessage, stopStreaming } from '@/lib/chat'
-import { connectOpenRouter } from '@/lib/connect'
+import { parseModelRef, PROVIDERS } from '@/lib/providers'
 import { createConversation, updateConversation } from '@/lib/repo'
-import { useSettings } from '@/stores/settings'
+import { useModelName } from '@/stores/models'
+import { connectedProviders, useSettings } from '@/stores/settings'
 import { useIsStreaming } from '@/stores/streams'
 import { useUI } from '@/stores/ui'
 
@@ -23,7 +24,7 @@ export function ChatRoute() {
 function ChatPage({ id }: { id: string | undefined }) {
   const conversation = useConversation(id)
   const messages = useMessages(id)
-  const apiKey = useSettings((s) => s.apiKey)
+  const apiKeys = useSettings((s) => s.apiKeys)
   const defaultModel = useSettings((s) => s.defaultModel)
   const defaultSystemPrompt = useSettings((s) => s.defaultSystemPrompt)
   const draft = useUI((s) => s.draft)
@@ -43,6 +44,8 @@ function ChatPage({ id }: { id: string | undefined }) {
   const model = conversation?.model ?? draft.model ?? defaultModel
   const systemPrompt = conversation?.systemPrompt ?? draft.systemPrompt ?? defaultSystemPrompt
   const hasMessages = !!messages && messages.length > 0
+  const hasAnyKey = connectedProviders(apiKeys).length > 0
+  const needsKey = hasAnyKey && !apiKeys[parseModelRef(model).provider]
 
   async function handleSend(text: string) {
     if (conversation) {
@@ -74,11 +77,12 @@ function ChatPage({ id }: { id: string | undefined }) {
         <MessageList messages={messages} busy={streaming} />
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto py-8">
-          {apiKey ? <EmptyChat /> : <ConnectCard />}
+          {hasAnyKey ? <EmptyChat /> : <ConnectCard />}
         </div>
       )}
 
-      {apiKey ? (
+      {needsKey && <MissingKeyNotice modelRef={model} />}
+      {hasAnyKey ? (
         <Composer onSend={(text) => void handleSend(text)} onStop={() => id && stopStreaming(id)} streaming={streaming} />
       ) : (
         hasMessages && <ReconnectBar />
@@ -96,12 +100,30 @@ function EmptyChat() {
   )
 }
 
+/** The chosen model belongs to a provider the user has no key for yet. */
+function MissingKeyNotice({ modelRef }: { modelRef: string }) {
+  const setSettingsOpen = useUI((s) => s.setSettingsOpen)
+  const name = useModelName(modelRef)
+  const provider = PROVIDERS[parseModelRef(modelRef).provider].name
+  return (
+    <div className="mx-auto mb-2 flex w-[calc(100%-1.5rem)] max-w-3xl flex-wrap items-center justify-between gap-2 rounded-xl border bg-muted/50 px-4 py-2 text-sm sm:w-[calc(100%-2rem)]">
+      <span className="text-muted-foreground">
+        {name} runs on {provider}. Add your {provider} key, or pick another model above.
+      </span>
+      <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
+        Add key
+      </Button>
+    </div>
+  )
+}
+
 function ReconnectBar() {
+  const setSettingsOpen = useUI((s) => s.setSettingsOpen)
   return (
     <div className="shrink-0 border-t px-4 py-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] text-center text-sm">
-      <span className="text-muted-foreground">Connect OpenRouter to continue this chat.</span>{' '}
-      <Button variant="link" className="h-auto p-0" onClick={() => void connectOpenRouter()}>
-        Connect
+      <span className="text-muted-foreground">Add an API key to continue this chat.</span>{' '}
+      <Button variant="link" className="h-auto p-0" onClick={() => setSettingsOpen(true)}>
+        Open Settings
       </Button>
     </div>
   )

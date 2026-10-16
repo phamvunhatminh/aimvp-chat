@@ -1,9 +1,17 @@
 import { toast } from 'sonner'
+import { findModel } from '@/stores/models'
 import { useSettings } from '@/stores/settings'
 import { useStreams } from '@/stores/streams'
 import { useUI } from '@/stores/ui'
 import type { Message } from './db'
-import { OpenRouterError, streamChat, type ChatMessage, type Usage } from './openrouter'
+import {
+  loadProvider,
+  parseModelRef,
+  ProviderError,
+  PROVIDERS,
+  type ChatMessage,
+  type Usage,
+} from './providers'
 import {
   addMessage,
   deleteMessages,
@@ -79,16 +87,18 @@ export async function regenerate(conversationId: string): Promise<void> {
   await runCompletion(conversationId)
 }
 
-function errorMessage(err: unknown): string {
-  if (err instanceof OpenRouterError) return err.message
-  return 'Could not reach OpenRouter. Check your connection and try again.'
+function errorMessage(err: unknown, providerName: string): string {
+  if (err instanceof ProviderError) return err.message
+  return `Could not reach ${providerName}. Check your connection and try again.`
 }
 
 async function runCompletion(conversationId: string): Promise<void> {
   const conversation = await getConversation(conversationId)
   if (!conversation || isStreaming(conversationId)) return
   const history = await getMessages(conversationId)
-  const apiKey = useSettings.getState().apiKey
+  const { provider, model } = parseModelRef(conversation.model)
+  const providerName = PROVIDERS[provider].name
+  const apiKey = useSettings.getState().apiKeys[provider]
 
   const controller = new AbortController()
   useStreams.setState((s) => ({ controllers: { ...s.controllers, [conversationId]: controller } }))
@@ -114,10 +124,14 @@ async function runCompletion(conversationId: string): Promise<void> {
   }
 
   try {
-    if (!apiKey) throw new OpenRouterError('Connect your OpenRouter account to start chatting.', 401)
-    const stream = streamChat({
+    if (!apiKey) {
+      throw new ProviderError(`Add your ${providerName} API key in Settings to use this model.`, 401, provider)
+    }
+    const client = await loadProvider(provider)
+    const stream = client.streamChat({
       apiKey,
-      model: conversation.model,
+      model,
+      modelInfo: findModel(provider, model),
       messages: buildPrompt(conversation.systemPrompt, history),
       signal: controller.signal,
     })
@@ -141,9 +155,9 @@ async function runCompletion(conversationId: string): Promise<void> {
       if (content || reasoning) await updateMessage(reply.id, { content, reasoning, usage, status: 'done' })
       else await deleteMessages(conversationId, (m) => m.id === reply.id)
     } else {
-      await updateMessage(reply.id, { content, reasoning, status: 'error', error: errorMessage(err) })
-      if (err instanceof OpenRouterError && err.isAuthError) {
-        toast.error('OpenRouter key needed', {
+      await updateMessage(reply.id, { content, reasoning, status: 'error', error: errorMessage(err, providerName) })
+      if (err instanceof ProviderError && err.isAuthError) {
+        toast.error(`${providerName} key needed`, {
           description: err.message,
           action: { label: 'Settings', onClick: () => useUI.getState().setSettingsOpen(true) },
         })

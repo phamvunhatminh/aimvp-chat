@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie'
-import type { Usage } from './openrouter'
+import { normalizeModelRef, type Usage } from './providers'
 
 /**
  * Every record has a client-generated UUID, `updatedAt` and a `deletedAt`
@@ -9,6 +9,7 @@ import type { Usage } from './openrouter'
 export interface Conversation {
   id: string
   title: string
+  /** Model reference, `provider:model-id`. */
   model: string
   systemPrompt: string
   createdAt: number
@@ -24,7 +25,7 @@ export interface Message {
   role: 'user' | 'assistant'
   content: string
   reasoning: string
-  /** Model that produced an assistant message. */
+  /** Model reference (`provider:model-id`) that produced an assistant message. */
   model: string | null
   status: MessageStatus
   error: string | null
@@ -43,6 +44,21 @@ export class ChatDB extends Dexie {
     this.version(1).stores({
       conversations: 'id, updatedAt',
       messages: 'id, [conversationId+createdAt], status, updatedAt',
+    })
+    // v2: model ids gained a provider prefix (`openrouter:...`) when more providers arrived.
+    this.version(2).upgrade(async (tx) => {
+      await tx
+        .table<Conversation>('conversations')
+        .toCollection()
+        .modify((c) => {
+          c.model = normalizeModelRef(c.model)
+        })
+      await tx
+        .table<Message>('messages')
+        .toCollection()
+        .modify((m) => {
+          if (m.model) m.model = normalizeModelRef(m.model)
+        })
     })
   }
 }
