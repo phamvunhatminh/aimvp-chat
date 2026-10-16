@@ -10,7 +10,8 @@ import { costText } from './shared'
 export function UsageWidget({ onNavigate }: { onNavigate?: () => void }) {
   const stats = useUsage('month')
   const budget = useSettings((s) => s.monthlyBudget)
-  if (!stats) return null
+  // Nothing to show until the first reply of the month.
+  if (!stats || stats.totals.replies === 0) return null
   const { totals } = stats
   const tokens = totals.promptTokens + totals.completionTokens
   // Without known prices, spend would read $0; show tokens instead.

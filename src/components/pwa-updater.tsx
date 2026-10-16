@@ -17,7 +17,7 @@ export function PwaUpdater() {
 
   useEffect(() => {
     if (!needRefresh) return
-    toast('A new version of aimvp is available.', {
+    toast('A new version is available.', {
       duration: Infinity,
       action: { label: 'Reload', onClick: () => void updateServiceWorker(true) },
     })

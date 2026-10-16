@@ -8,7 +8,9 @@ your chats never touch an aimvp server.
 
 - Four providers, one key each: OpenRouter (hundreds of models, `openrouter/auto` by default), OpenAI,
   Anthropic and Google Gemini
-- Model picker grouped by provider, with search, OpenRouter pricing and favorites
+- Model picker in the message box, grouped by provider, with search, OpenRouter pricing and favorites
+- New chats start with the message box in the middle and a few suggestions; the sidebar can be hidden on wide
+  screens
 - Streaming replies with stop, regenerate, edit-and-resend, and "thinking" output for reasoning models
 - Markdown, tables and syntax-highlighted code with copy and download buttons
 - Attach images, PDFs, Word, Excel and text/code files (paste, drop or pick); PDFs go natively to Claude and

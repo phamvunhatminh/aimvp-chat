@@ -39,7 +39,7 @@ export function AuthCallback() {
           <p className="max-w-sm text-muted-foreground">{error}</p>
           <Button asChild>
             <Link to="/" replace>
-              Back to aimvp
+              Back to chat
             </Link>
           </Button>
         </>

@@ -5,6 +5,7 @@ import {
   FolderPlusIcon,
   LoaderCircleIcon,
   MoreHorizontalIcon,
+  PanelLeftCloseIcon,
   PencilIcon,
   PlusIcon,
   SearchIcon,
@@ -14,7 +15,6 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, NavLink, useNavigate, useParams } from 'react-router'
-import { Logo } from '@/components/logo'
 import { NameDialog } from '@/components/name-dialog'
 import {
   AlertDialog,
@@ -42,7 +42,7 @@ import { useSettings } from '@/stores/settings'
 import { MoveToProjectDialog } from './move-to-project-dialog'
 import { ProjectMenu } from './project-menu'
 
-const rowClass = 'flex h-9 items-center gap-2 rounded-md pr-9 pl-2 text-sm hover:bg-accent'
+const rowClass = 'flex h-9 items-center gap-2 rounded-lg pr-9 pl-2.5 text-sm transition-colors hover:bg-accent'
 const rowMenuClass =
   'absolute top-0.5 right-0.5 text-muted-foreground data-[state=open]:opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100'
 
@@ -53,6 +53,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [creatingProject, setCreatingProject] = useState(false)
   const setSettingsOpen = useUI((s) => s.setSettingsOpen)
   const showUsage = useSettings((s) => s.showUsageInSidebar)
+  const setCollapsed = useSettings((s) => s.setSidebarCollapsed)
   const { id: activeId } = useParams()
   const navigate = useNavigate()
   const activeProjectId = conversations?.find((c) => c.id === activeId)?.projectId ?? null
@@ -63,26 +64,36 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <div className="flex h-full flex-col pt-[env(safe-area-inset-top)]">
-      <div className="flex h-14 shrink-0 items-center justify-between px-3">
-        <Link to="/" onClick={onNavigate} className="flex items-center gap-2 rounded-md px-1 font-semibold">
-          <Logo />
-          aimvp
-        </Link>
-        <Button variant="ghost" size="icon" asChild>
-          <Link to="/" onClick={onNavigate} aria-label="New chat" title="New chat">
+      <div className="flex h-14 shrink-0 items-center gap-1 px-2">
+        <Button variant="ghost" className="h-9 flex-1 justify-start gap-2.5 px-2.5 font-medium" asChild>
+          <Link to="/" onClick={onNavigate}>
             <SquarePenIcon />
+            New chat
           </Link>
         </Button>
+        {/* The phone sheet closes itself; the wide-screen sidebar can be hidden. */}
+        {!onNavigate && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground"
+            onClick={() => setCollapsed(true)}
+            aria-label="Hide sidebar"
+            title="Hide sidebar"
+          >
+            <PanelLeftCloseIcon />
+          </Button>
+        )}
       </div>
 
-      <div className="relative px-3 pb-2">
-        <SearchIcon className="pointer-events-none absolute top-1/2 left-5.5 size-4 -translate-y-1/2 text-muted-foreground" />
+      <div className="relative px-2 pb-2">
+        <SearchIcon className="pointer-events-none absolute top-1/2 left-4.5 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search chats"
           aria-label="Search chats"
-          className="bg-background pl-8"
+          className="h-9 rounded-lg border-transparent bg-accent/70 pl-8 shadow-none focus-visible:border-input focus-visible:bg-background"
         />
       </div>
 

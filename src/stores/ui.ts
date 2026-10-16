@@ -7,14 +7,20 @@ export interface PromptDraft {
   content: string
 }
 
+export type SettingsTab = 'general' | 'keys' | 'voice' | 'usage' | 'data'
+
 interface UIState {
   settingsOpen: boolean
+  settingsTab: SettingsTab
   sidebarOpen: boolean
   /** Model and system prompt for the "New chat" screen, before a conversation exists. */
   draft: { model: string | null; systemPrompt: string | null; webSearch: boolean }
   /** The prompt library dialog: closed, open on the list, or open on a prompt. */
   promptLibrary: { open: boolean; editing: PromptDraft | null }
   setSettingsOpen: (open: boolean) => void
+  /** Opens Settings, on a given tab. */
+  openSettings: (tab?: SettingsTab) => void
+  setSettingsTab: (tab: SettingsTab) => void
   openPromptLibrary: (editing?: PromptDraft) => void
   setPromptEditing: (editing: PromptDraft | null) => void
   closePromptLibrary: () => void
@@ -25,10 +31,13 @@ interface UIState {
 
 export const useUI = create<UIState>()((set) => ({
   settingsOpen: false,
+  settingsTab: 'general',
   sidebarOpen: false,
   draft: { model: null, systemPrompt: null, webSearch: false },
   promptLibrary: { open: false, editing: null },
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  openSettings: (tab = 'general') => set({ settingsOpen: true, settingsTab: tab }),
+  setSettingsTab: (settingsTab) => set({ settingsTab }),
   openPromptLibrary: (editing) => set({ settingsOpen: false, promptLibrary: { open: true, editing: editing ?? null } }),
   setPromptEditing: (editing) => set((s) => ({ promptLibrary: { ...s.promptLibrary, editing } })),
   closePromptLibrary: () => set({ promptLibrary: { open: false, editing: null } }),

@@ -21,6 +21,7 @@ import { costOf } from '@/lib/pricing'
 import { parseModelRef, PROVIDERS, type Source } from '@/lib/providers'
 import { readAloud, stopReading, useCanReadAloud, useReadAloud } from '@/lib/read-aloud'
 import { deriveTitle } from '@/lib/repo'
+import { useModelName } from '@/stores/models'
 import { useStreams } from '@/stores/streams'
 import { useUI } from '@/stores/ui'
 import { MessageAttachments } from './attachments'
@@ -270,7 +271,8 @@ function ReadAloudButton({ messageId, content }: { messageId: string; content: s
 function MessageMeta({ message }: { message: Message }) {
   const price = usePriceLookup()
   const ref = message.model ? parseModelRef(message.model) : null
-  const parts = [ref && `${ref.model} · ${PROVIDERS[ref.provider].name}`]
+  const name = useModelName(message.model ?? '')
+  const parts = [ref && `${name} · ${PROVIDERS[ref.provider].name}`]
   if (message.usage) {
     parts.push(`${(message.usage.promptTokens + message.usage.completionTokens).toLocaleString()} tokens`)
     const cost = ref ? costOf(message.usage, price(ref.provider, ref.model)) : null

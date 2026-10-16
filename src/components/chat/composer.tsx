@@ -1,32 +1,58 @@
-import { AlertTriangleIcon, ArrowUpIcon, Loader2Icon, MicIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
+import {
+  AlertTriangleIcon,
+  ArrowUpIcon,
+  Loader2Icon,
+  MicIcon,
+  PaperclipIcon,
+  SquareIcon,
+  type LucideIcon,
+} from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { ModelPicker } from '@/components/model-picker'
 import { Button } from '@/components/ui/button'
 import { usePromptPicker } from '@/hooks/use-prompt-picker'
 import { useVoiceInput } from '@/hooks/use-voice-input'
 import { ACCEPT, type PreparedFile } from '@/lib/files'
 import { parseModelRef } from '@/lib/providers'
-import { isTouchDevice } from '@/lib/utils'
+import { cn, isTouchDevice } from '@/lib/utils'
 import { addFiles, takeFiles, useComposer } from '@/stores/composer'
 import { useModelCatalog } from '@/stores/models'
 import { PendingAttachments } from './attachments'
 import { PromptButton, PromptPicker } from './prompt-picker'
+
+/** A starting point offered under the message box of a new chat. */
+export interface Suggestion {
+  icon: LucideIcon
+  label: string
+  /** Put in the message box, ready to finish. */
+  text: string
+}
+
+const toolButton = 'rounded-full text-muted-foreground hover:text-foreground'
 
 export function Composer({
   onSend,
   onStop,
   streaming,
   modelRef,
-  placeholder = 'Message aimvp…',
+  onModelChange,
+  placeholder = 'Ask anything',
   tools,
+  variant = 'docked',
+  suggestions,
 }: {
   onSend: (text: string, files: PreparedFile[]) => void
   onStop: () => void
   streaming: boolean
-  /** The chat's model, to warn about attachments it can't read. */
+  /** The chat's model: shown in the toolbar, and used to warn about attachments it can't read. */
   modelRef: string
+  onModelChange?: (ref: string) => void
   placeholder?: string
-  /** Extra buttons for the toolbar, left of send. */
+  /** Extra buttons for the toolbar, after the built-in ones. */
   tools?: ReactNode
+  /** `hero` sits in the middle of an empty chat, with suggestions under it. */
+  variant?: 'docked' | 'hero'
+  suggestions?: Suggestion[]
 }) {
   const [text, setText] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -58,15 +84,29 @@ export function Composer({
     setText('')
   }
 
+  function applySuggestion(suggestion: Suggestion) {
+    setText(suggestion.text)
+    requestAnimationFrame(() => {
+      const el = ref.current
+      el?.focus()
+      el?.setSelectionRange(suggestion.text.length, suggestion.text.length)
+    })
+  }
+
   return (
-    <div className="shrink-0 px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] sm:px-4 print:hidden">
+    <div
+      className={cn(
+        'w-full px-3 sm:px-4 print:hidden',
+        variant === 'docked' && 'shrink-0 pb-[max(env(safe-area-inset-bottom),0.75rem)]',
+      )}
+    >
       <PromptPicker picker={picker} textarea={ref} buttonRef={promptButton}>
         <form
           onSubmit={(e) => {
             e.preventDefault()
             submit()
           }}
-          className="mx-auto max-w-3xl rounded-3xl border bg-background p-2 shadow-sm transition-shadow focus-within:ring-2 focus-within:ring-ring/30"
+          className="mx-auto max-w-3xl rounded-[1.75rem] border bg-background p-2 shadow-composer transition-colors focus-within:border-ring/70 dark:bg-popover"
         >
           <PendingAttachments files={files} />
           <textarea
@@ -96,7 +136,7 @@ export function Composer({
             placeholder={placeholder}
             aria-label="Message"
             {...picker.textareaProps}
-            className="block max-h-52 min-h-10 w-full resize-none bg-transparent px-3 py-2 text-base outline-none placeholder:text-muted-foreground"
+            className="block max-h-52 min-h-11 w-full resize-none bg-transparent px-3 py-2.5 text-base outline-none placeholder:text-muted-foreground"
           />
           <div className="flex items-center gap-1">
             <input
@@ -114,7 +154,7 @@ export function Composer({
               type="button"
               variant="ghost"
               size="icon"
-              className="rounded-full text-muted-foreground"
+              className={toolButton}
               onClick={() => fileInput.current?.click()}
               aria-label="Attach files"
               title="Attach images or files"
@@ -129,14 +169,28 @@ export function Composer({
                 <span className="truncate">This model can't read images</span>
               </span>
             )}
-            <div className="ml-auto flex items-center gap-1">
+            <div className="ml-auto flex min-w-0 items-center gap-1">
+              {onModelChange && (
+                <ModelPicker
+                  variant="composer"
+                  value={modelRef}
+                  onChange={onModelChange}
+                  className="max-w-[9.5rem] sm:max-w-[16rem]"
+                />
+              )}
               <VoiceButton voice={voice} />
               {streaming ? (
                 <Button type="button" size="icon" className="rounded-full" onClick={onStop} aria-label="Stop generating">
                   <SquareIcon className="size-3.5 fill-current" />
                 </Button>
               ) : (
-                <Button type="submit" size="icon" className="rounded-full" disabled={!canSend} aria-label="Send message">
+                <Button
+                  type="submit"
+                  size="icon"
+                  className="rounded-full disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
+                  disabled={!canSend}
+                  aria-label="Send message"
+                >
                   <ArrowUpIcon />
                 </Button>
               )}
@@ -144,7 +198,25 @@ export function Composer({
           </div>
         </form>
       </PromptPicker>
-      <p className="mt-2 text-center text-xs text-muted-foreground">AI can make mistakes. Check important info.</p>
+      {variant === 'hero' && suggestions?.length ? (
+        <ul className="mx-auto mt-4 flex max-w-3xl flex-wrap justify-center gap-2" aria-label="Suggestions">
+          {suggestions.map((s) => (
+            <li key={s.label}>
+              <button
+                type="button"
+                onClick={() => applySuggestion(s)}
+                className="flex items-center gap-2 rounded-full border px-3.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <s.icon className="size-4" />
+                {s.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {variant === 'docked' && (
+        <p className="mt-2 text-center text-[11px] text-muted-foreground">AI can make mistakes. Check important info.</p>
+      )}
     </div>
   )
 }
@@ -166,7 +238,7 @@ function VoiceButton({ voice }: { voice: ReturnType<typeof useVoiceInput> }) {
         type="button"
         variant={listening ? 'destructive' : 'ghost'}
         size="icon"
-        className={listening ? 'relative rounded-full' : 'rounded-full text-muted-foreground'}
+        className={listening ? 'relative rounded-full' : toolButton}
         onClick={listening ? voice.stop : voice.start}
         aria-label={listening ? 'Stop voice input' : 'Start voice input'}
         aria-pressed={listening}

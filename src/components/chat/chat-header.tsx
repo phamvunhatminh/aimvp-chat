@@ -1,24 +1,21 @@
-import { FileDownIcon, FolderIcon, MenuIcon, MoreHorizontalIcon, PrinterIcon, SquarePenIcon } from 'lucide-react'
+import { FileDownIcon, FolderIcon, MoreHorizontalIcon, PrinterIcon, SquarePenIcon } from 'lucide-react'
 import { Link } from 'react-router'
-import { ModelPicker } from '@/components/model-picker'
+import { SidebarToggle } from '@/components/sidebar-toggle'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import type { Project } from '@/lib/db'
-import { cn } from '@/lib/utils'
-import { useUI } from '@/stores/ui'
 import { SystemPromptDialog } from './system-prompt-dialog'
 
 export function ChatHeader({
-  model,
-  onModelChange,
+  title,
   systemPrompt,
   onSystemPromptChange,
   project,
   onDownloadMarkdown,
   usageNote,
 }: {
-  model: string
-  onModelChange: (model: string) => void
+  /** The chat's title, once it has one. */
+  title?: string
   systemPrompt: string
   onSystemPromptChange: (prompt: string) => void
   /** The project this chat belongs to (or will be created in). */
@@ -28,25 +25,11 @@ export function ChatHeader({
   /** What this chat has used so far, e.g. "~$0.02 · 12k tokens". */
   usageNote?: string
 }) {
-  const setSidebarOpen = useUI((s) => s.setSidebarOpen)
-
   return (
     <header className="flex h-14 shrink-0 items-center gap-1 px-2 sm:px-3 print:hidden">
-      <Button
-        variant="ghost"
-        size="icon"
-        className="md:hidden"
-        onClick={() => setSidebarOpen(true)}
-        aria-label="Open sidebar"
-      >
-        <MenuIcon />
-      </Button>
-      <ModelPicker
-        value={model}
-        onChange={onModelChange}
-        className={cn(project ? 'max-w-[min(42vw,24rem)]' : 'max-w-[min(60vw,24rem)]')}
-      />
-      <div className="ml-auto flex min-w-0 items-center gap-1">
+      <SidebarToggle />
+      {title && <p className="min-w-0 truncate px-2 text-sm font-medium">{title}</p>}
+      <div className="ml-auto flex shrink-0 items-center gap-0.5">
         {project && (
           <Link
             to={`/p/${project.id}`}
@@ -54,7 +37,7 @@ export function ChatHeader({
             title={`Project: ${project.name}`}
           >
             <FolderIcon className="size-4 shrink-0" />
-            <span className="max-w-24 truncate sm:max-w-48">{project.name}</span>
+            <span className="max-w-28 truncate sm:max-w-48">{project.name}</span>
           </Link>
         )}
         <SystemPromptDialog value={systemPrompt} onSave={onSystemPromptChange} />
@@ -82,7 +65,7 @@ export function ChatHeader({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        <Button variant="ghost" size="icon" className="md:hidden" asChild>
+        <Button variant="ghost" size="icon" className="text-muted-foreground md:hidden" asChild>
           <Link to={project ? `/p/${project.id}` : '/'} aria-label="New chat">
             <SquarePenIcon />
           </Link>

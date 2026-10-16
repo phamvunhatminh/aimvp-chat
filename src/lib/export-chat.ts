@@ -8,7 +8,7 @@ export function modelLabel(ref: string): string {
 
 /** A chat as a Markdown document; attachments are listed by name. */
 export function conversationToMarkdown(conversation: Conversation, messages: Message[], at = new Date()): string {
-  const lines = [`# ${conversation.title}`, '', `_${modelLabel(conversation.model)} · exported ${at.toISOString().slice(0, 10)} from aimvp_`]
+  const lines = [`# ${conversation.title}`, '', `_${modelLabel(conversation.model)} · exported ${at.toISOString().slice(0, 10)}_`]
   for (const m of messages) {
     if (m.role === 'assistant' && m.status === 'error' && !m.content) continue
     lines.push('', m.role === 'user' ? '## You' : `## Assistant${m.model ? ` (${modelLabel(m.model)})` : ''}`, '')

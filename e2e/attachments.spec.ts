@@ -45,7 +45,7 @@ test('PDF and Word files are read in the browser and sent as text', async ({ pag
   expect(parts[0].text).toContain('Hello from the PDF')
   expect(parts[1].text).toBe('<file name="brief.docx">\nLaunch on Friday\nBudget is small\n</file>')
   // A message with only files is titled after the first one.
-  await expect(page).toHaveTitle('spec.pdf · aimvp')
+  await expect(page).toHaveTitle('spec.pdf')
 })
 
 test('paste a screenshot and drop a file onto the chat', async ({ page }) => {
