@@ -3,23 +3,29 @@ import { findModel } from '@/stores/models'
 import { useSettings } from '@/stores/settings'
 import { useStreams } from '@/stores/streams'
 import { useUI } from '@/stores/ui'
-import type { Message } from './db'
+import { bytesToBase64 } from './base64'
+import type { Attachment, Message } from './db'
+import type { PreparedFile } from './files'
 import {
+  documentAsText,
   loadProvider,
   parseModelRef,
   ProviderError,
   PROVIDERS,
   type ChatMessage,
+  type ContentPart,
   type Usage,
 } from './providers'
 import {
   addMessage,
   deleteMessages,
   deriveTitle,
+  getBlob,
   getConversation,
   getMessages,
   getProject,
   NEW_CHAT_TITLE,
+  saveBlob,
   updateConversation,
   updateMessage,
 } from './repo'
@@ -27,17 +33,49 @@ import {
 const UI_FLUSH_MS = 50
 const PERSIST_MS = 1000
 
-/** Project instructions first, then the chat's own system prompt; blank parts are dropped. */
-export function buildPrompt(systemPrompts: string[], history: Message[]): ChatMessage[] {
+async function toContentPart(a: Attachment): Promise<ContentPart> {
+  const blob = a.blobId ? await getBlob(a.blobId) : undefined
+  if (a.kind === 'image') {
+    return blob
+      ? { type: 'image', mimeType: blob.mimeType, data: bytesToBase64(blob.data) }
+      : { type: 'text', text: `[Image "${a.name}" is no longer available.]` }
+  }
+  if (a.mimeType === 'application/pdf' && blob) {
+    return { type: 'document', name: a.name, data: bytesToBase64(blob.data), text: a.text }
+  }
+  return { type: 'text', text: documentAsText(a.name, a.text) }
+}
+
+/**
+ * The request messages: project instructions first, then the chat's own system
+ * prompt (blank parts dropped), then the history with each user message's files.
+ */
+export async function buildPrompt(systemPrompts: string[], history: Message[]): Promise<ChatMessage[]> {
   const messages: ChatMessage[] = []
   const system = systemPrompts.filter((p) => p.trim()).join('\n\n')
   if (system) messages.push({ role: 'system', content: system })
   for (const m of history) {
     // Failed or empty replies are shown to the user but never sent back to the model.
     if (m.role === 'assistant' && (m.status !== 'done' || !m.content)) continue
-    messages.push({ role: m.role, content: m.content })
+    if (m.role === 'assistant' || !m.attachments?.length) {
+      messages.push({ role: m.role, content: m.content })
+      continue
+    }
+    const parts = await Promise.all(m.attachments.map(toContentPart))
+    if (m.content) parts.push({ type: 'text', text: m.content })
+    messages.push({ role: 'user', content: parts })
   }
   return messages
+}
+
+/** Stores the files' bytes and returns their attachments. */
+async function saveAttachments(files: PreparedFile[]): Promise<Attachment[]> {
+  return Promise.all(
+    files.map(async ({ attachment, data }) => ({
+      ...attachment,
+      blobId: data ? await saveBlob(data, attachment.mimeType) : null,
+    })),
+  )
 }
 
 export function isStreaming(conversationId: string): boolean {
@@ -56,14 +94,15 @@ function requestPersistentStorage() {
   navigator.storage?.persist?.().catch(() => {})
 }
 
-export async function sendMessage(conversationId: string, text: string): Promise<void> {
+export async function sendMessage(conversationId: string, text: string, files: PreparedFile[] = []): Promise<void> {
   const conversation = await getConversation(conversationId)
   if (!conversation || isStreaming(conversationId)) return
   // A new message supersedes any failed reply above it.
   await deleteMessages(conversationId, (m) => m.status === 'error')
-  await addMessage({ conversationId, role: 'user', content: text })
+  const attachments = await saveAttachments(files)
+  await addMessage({ conversationId, role: 'user', content: text, attachments })
   if (conversation.title === NEW_CHAT_TITLE) {
-    await updateConversation(conversationId, { title: deriveTitle(text) })
+    await updateConversation(conversationId, { title: deriveTitle(text || (files[0]?.attachment.name ?? '')) })
   }
   requestPersistentStorage()
   await runCompletion(conversationId)
@@ -136,7 +175,7 @@ async function runCompletion(conversationId: string): Promise<void> {
       apiKey,
       model,
       modelInfo: findModel(provider, model),
-      messages: buildPrompt([project?.instructions ?? '', conversation.systemPrompt], history),
+      messages: await buildPrompt([project?.instructions ?? '', conversation.systemPrompt], history),
       signal: controller.signal,
     })
     for await (const event of stream) {

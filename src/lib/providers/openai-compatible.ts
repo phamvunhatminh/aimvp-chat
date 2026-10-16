@@ -1,11 +1,26 @@
 import { readSSE } from '@/lib/sse'
 import { httpError, readErrorBody, type ApiErrorBody } from './errors'
-import type { ProviderId, StreamEvent } from './types'
+import { documentAsText, type ChatMessage, type ProviderId, type StreamEvent } from './types'
 
 interface ChunkPayload {
   error?: ApiErrorBody
   choices?: { delta?: { content?: string | null; reasoning?: string | null } }[]
   usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number }
+}
+
+/** Chat Completions messages: images as data URLs; documents as their extracted text. */
+export function toChatCompletionsMessages(messages: ChatMessage[]) {
+  return messages.map((m) => ({
+    role: m.role,
+    content:
+      typeof m.content === 'string'
+        ? m.content
+        : m.content.map((p) => {
+            if (p.type === 'image') return { type: 'image_url', image_url: { url: `data:${p.mimeType};base64,${p.data}` } }
+            if (p.type === 'document') return { type: 'text', text: documentAsText(p.name, p.text) }
+            return { type: 'text', text: p.text }
+          }),
+  }))
 }
 
 /** Maps a provider's error status (and body) onto the statuses `httpError` understands. */

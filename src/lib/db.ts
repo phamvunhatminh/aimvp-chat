@@ -31,11 +31,35 @@ export interface Conversation {
 
 export type MessageStatus = 'done' | 'streaming' | 'error'
 
+export interface Attachment {
+  id: string
+  kind: 'image' | 'file'
+  name: string
+  mimeType: string
+  /** Bytes of the stored original (images are stored after downscaling). */
+  size: number
+  /** Text extracted from a document; empty for images. */
+  text: string
+  /** The original bytes in the `blobs` table: images and PDFs. */
+  blobId: string | null
+  width?: number
+  height?: number
+}
+
+/** Binary data kept out of message rows so chat lists stay light. */
+export interface StoredBlob {
+  id: string
+  mimeType: string
+  data: ArrayBuffer
+  createdAt: number
+}
+
 export interface Message {
   id: string
   conversationId: string
   role: 'user' | 'assistant'
   content: string
+  attachments: Attachment[]
   reasoning: string
   /** Model reference (`provider:model-id`) that produced an assistant message. */
   model: string | null
@@ -51,6 +75,7 @@ export class ChatDB extends Dexie {
   projects!: EntityTable<Project, 'id'>
   conversations!: EntityTable<Conversation, 'id'>
   messages!: EntityTable<Message, 'id'>
+  blobs!: EntityTable<StoredBlob, 'id'>
 
   constructor(name = 'aimvp') {
     super(name)
@@ -82,6 +107,17 @@ export class ChatDB extends Dexie {
           .toCollection()
           .modify((c) => {
             c.projectId ??= null
+          })
+      })
+    // v4: messages carry attachments; their bytes live in `blobs`.
+    this.version(4)
+      .stores({ blobs: 'id' })
+      .upgrade(async (tx) => {
+        await tx
+          .table<Message>('messages')
+          .toCollection()
+          .modify((m) => {
+            m.attachments ??= []
           })
       })
   }

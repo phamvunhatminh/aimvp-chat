@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { httpError, networkError, ProviderError } from './errors'
-import type { ModelInfo, ProviderClient, StreamEvent } from './types'
+import { textOf, type ChatMessage, type ModelInfo, type ProviderClient, type StreamEvent } from './types'
 
 /** Used when the model's output limit is unknown (e.g. a model id typed by hand). */
 const FALLBACK_MAX_TOKENS = 16_000
@@ -11,6 +11,22 @@ function client(apiKey: string) {
   // The key is the user's own, entered in this browser; the SDK sends the
   // `anthropic-dangerous-direct-browser-access` header that CORS requires.
   return new Anthropic({ apiKey, dangerouslyAllowBrowser: true })
+}
+
+type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+
+/** Message content as Anthropic blocks; files and images go before the text. */
+export function toAnthropicContent(content: ChatMessage['content']): Anthropic.MessageParam['content'] {
+  if (typeof content === 'string') return content
+  return content.map((p): Anthropic.ContentBlockParam => {
+    if (p.type === 'image') {
+      return { type: 'image', source: { type: 'base64', media_type: p.mimeType as ImageMediaType, data: p.data } }
+    }
+    if (p.type === 'document') {
+      return { type: 'document', title: p.name, source: { type: 'base64', media_type: 'application/pdf', data: p.data } }
+    }
+    return { type: 'text', text: p.text }
+  })
 }
 
 function toProviderError(err: unknown): unknown {
@@ -44,6 +60,9 @@ export const anthropic: ProviderClient = {
           contextLength: m.max_input_tokens,
           maxOutputTokens: m.max_tokens,
           reasoning: m.capabilities?.thinking?.types?.adaptive?.supported === true,
+          inputs: m.capabilities
+            ? { image: m.capabilities.image_input?.supported, pdf: m.capabilities.pdf_input?.supported }
+            : undefined,
         })
       }
     } catch (err) {
@@ -63,11 +82,11 @@ export const anthropic: ProviderClient = {
   async *streamChat({ apiKey, model, modelInfo, messages, signal }): AsyncGenerator<StreamEvent> {
     const system = messages
       .filter((m) => m.role === 'system')
-      .map((m) => m.content)
+      .map((m) => textOf(m.content))
       .join('\n\n')
     // Consecutive same-role turns are fine: the API merges them.
     const turns: Anthropic.MessageParam[] = messages.flatMap((m) =>
-      m.role === 'system' ? [] : [{ role: m.role, content: m.content }],
+      m.role === 'system' ? [] : [{ role: m.role, content: toAnthropicContent(m.content) }],
     )
     const params: Anthropic.MessageStreamParams = {
       model,

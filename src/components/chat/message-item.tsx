@@ -6,6 +6,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { editAndResend, regenerate } from '@/lib/chat'
 import type { Message } from '@/lib/db'
 import { formatCost } from '@/lib/format'
+import { MessageAttachments } from './attachments'
 import { parseModelRef, PROVIDERS } from '@/lib/providers'
 import { useStreams } from '@/stores/streams'
 
@@ -66,9 +67,12 @@ function UserMessage({ message, busy }: { message: Message; busy: boolean }) {
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      <div className="max-w-[85%] rounded-3xl bg-secondary px-4 py-2.5 text-[15px] leading-7 break-words whitespace-pre-wrap">
-        {message.content}
-      </div>
+      <MessageAttachments attachments={message.attachments ?? []} align="end" />
+      {message.content && (
+        <div className="max-w-[85%] rounded-3xl bg-secondary px-4 py-2.5 text-[15px] leading-7 break-words whitespace-pre-wrap">
+          {message.content}
+        </div>
+      )}
       <div className={actionRow}>
         <CopyButton getText={() => message.content} />
         {!busy && (

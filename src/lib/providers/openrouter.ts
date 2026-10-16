@@ -1,5 +1,5 @@
 import { httpError, readErrorBody } from './errors'
-import { streamChatCompletions } from './openai-compatible'
+import { streamChatCompletions, toChatCompletionsMessages } from './openai-compatible'
 import type { ModelInfo, ProviderClient } from './types'
 
 export const OPENROUTER_API = 'https://openrouter.ai/api/v1'
@@ -18,7 +18,7 @@ interface ORModel {
   created?: number
   context_length?: number | null
   pricing?: { prompt?: string; completion?: string }
-  architecture?: { output_modalities?: string[] }
+  architecture?: { input_modalities?: string[]; output_modalities?: string[] }
 }
 
 /** Credits used and the key's limit. */
@@ -44,6 +44,10 @@ export const openrouter: ProviderClient = {
           created: m.created,
           contextLength: m.context_length,
           pricing: m.pricing && { prompt: m.pricing.prompt, completion: m.pricing.completion },
+          inputs: m.architecture?.input_modalities && {
+            image: m.architecture.input_modalities.includes('image'),
+            pdf: m.architecture.input_modalities.includes('file'),
+          },
         }),
       )
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -58,7 +62,7 @@ export const openrouter: ProviderClient = {
       provider: 'openrouter',
       url: `${OPENROUTER_API}/chat/completions`,
       apiKey,
-      body: { model, messages, stream: true, usage: { include: true } },
+      body: { model, messages: toChatCompletionsMessages(messages), stream: true, usage: { include: true } },
       signal,
     })
   },

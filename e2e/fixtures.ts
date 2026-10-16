@@ -2,7 +2,17 @@ import { test as base, expect, type BrowserContext, type Page } from '@playwrigh
 
 export const MODELS = [
   { id: 'openrouter/auto', name: 'Auto Router', pricing: { prompt: '-1', completion: '-1' } },
-  { id: 'anthropic/claude-test', name: 'Anthropic: Claude Test', pricing: { prompt: '0.000003', completion: '0.000015' } },
+  {
+    id: 'anthropic/claude-test',
+    name: 'Anthropic: Claude Test',
+    pricing: { prompt: '0.000003', completion: '0.000015' },
+    architecture: { input_modalities: ['text', 'image', 'file'], output_modalities: ['text'] },
+  },
+  {
+    id: 'text/only',
+    name: 'Text Only Model',
+    architecture: { input_modalities: ['text'], output_modalities: ['text'] },
+  },
   { id: 'openai/broke', name: 'OpenAI: Out Of Credits', pricing: { prompt: '0.00000015', completion: '0.0000006' } },
   { id: 'image/only', name: 'Image Only', architecture: { output_modalities: ['image'] } },
 ]

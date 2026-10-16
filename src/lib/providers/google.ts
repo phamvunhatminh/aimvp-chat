@@ -1,6 +1,6 @@
 import { readSSE } from '@/lib/sse'
 import { httpError, ProviderError, readErrorBody, type ApiErrorBody } from './errors'
-import type { ChatMessage, ModelInfo, ProviderClient, StreamEvent } from './types'
+import { textOf, type ChatMessage, type ModelInfo, type ProviderClient, type StreamEvent } from './types'
 
 const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta'
 
@@ -41,15 +41,26 @@ async function geminiFetch(path: string, apiKey: string, init: RequestInit = {})
   return res
 }
 
+type GeminiPart = { text: string } | { inlineData: { mimeType: string; data: string } }
+
+function toGeminiParts(content: ChatMessage['content']): GeminiPart[] {
+  if (typeof content === 'string') return [{ text: content }]
+  return content.map((p): GeminiPart => {
+    if (p.type === 'image') return { inlineData: { mimeType: p.mimeType, data: p.data } }
+    if (p.type === 'document') return { inlineData: { mimeType: 'application/pdf', data: p.data } }
+    return { text: p.text }
+  })
+}
+
 /** Gemini wants alternating turns; join consecutive messages from the same side. */
 export function toGeminiContents(messages: ChatMessage[]) {
-  const contents: { role: 'user' | 'model'; parts: { text: string }[] }[] = []
+  const contents: { role: 'user' | 'model'; parts: GeminiPart[] }[] = []
   for (const m of messages) {
     if (m.role === 'system') continue
     const role = m.role === 'assistant' ? 'model' : 'user'
     const last = contents.at(-1)
-    if (last?.role === role) last.parts.push({ text: m.content })
-    else contents.push({ role, parts: [{ text: m.content }] })
+    if (last?.role === role) last.parts.push(...toGeminiParts(m.content))
+    else contents.push({ role, parts: toGeminiParts(m.content) })
   }
   return contents
 }
@@ -73,6 +84,8 @@ export const google: ProviderClient = {
           name: m.displayName ?? id,
           contextLength: m.inputTokenLimit,
           maxOutputTokens: m.outputTokenLimit,
+          // Gemini models are multimodal: images and PDFs as inline data.
+          inputs: { image: true, pdf: true },
         })
       }
       pageToken = body.nextPageToken
@@ -88,7 +101,7 @@ export const google: ProviderClient = {
   async *streamChat({ apiKey, model, messages, signal }): AsyncGenerator<StreamEvent> {
     const system = messages
       .filter((m) => m.role === 'system')
-      .map((m) => m.content)
+      .map((m) => textOf(m.content))
       .join('\n\n')
     const res = await geminiFetch(`/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, apiKey, {
       method: 'POST',

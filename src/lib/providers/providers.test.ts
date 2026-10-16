@@ -382,3 +382,65 @@ describe('Google Gemini', () => {
     ])
   })
 })
+
+describe('images and documents', () => {
+  const withFiles = [
+    {
+      role: 'user' as const,
+      content: [
+        { type: 'image' as const, mimeType: 'image/jpeg', data: 'SU1H' },
+        { type: 'document' as const, name: 'report.pdf', data: 'UERG', text: 'Quarterly numbers' },
+        { type: 'text' as const, text: 'Summarize these' },
+      ],
+    },
+  ]
+
+  it('OpenAI-style APIs get image data URLs and the PDF as text', async () => {
+    const fetchMock = mockFetch(sseResponse([contentChunk('ok'), 'data: [DONE]\n\n']))
+    await collect(openrouter, { apiKey: 'k', model: 'a/b', messages: withFiles })
+    expect(requestOf(fetchMock).body.messages[0].content).toEqual([
+      { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,SU1H' } },
+      { type: 'text', text: '<file name="report.pdf">\nQuarterly numbers\n</file>' },
+      { type: 'text', text: 'Summarize these' },
+    ])
+  })
+
+  it('Anthropic gets image and document blocks', async () => {
+    const fetchMock = mockFetch(anthropicStream({ text: ['ok'] }))
+    await collect(anthropic, { apiKey: 'k', model: 'claude-opus-5-5', messages: withFiles })
+    expect(requestOf(fetchMock).body.messages[0].content).toEqual([
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'SU1H' } },
+      { type: 'document', title: 'report.pdf', source: { type: 'base64', media_type: 'application/pdf', data: 'UERG' } },
+      { type: 'text', text: 'Summarize these' },
+    ])
+  })
+
+  it('Gemini gets inline data parts', async () => {
+    const fetchMock = mockFetch(sseResponse([dataEvent({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] })]))
+    await collect(google, { apiKey: 'k', model: 'gemini-2.5-flash', messages: withFiles })
+    expect(requestOf(fetchMock).body.contents[0].parts).toEqual([
+      { inlineData: { mimeType: 'image/jpeg', data: 'SU1H' } },
+      { inlineData: { mimeType: 'application/pdf', data: 'UERG' } },
+      { text: 'Summarize these' },
+    ])
+  })
+
+  it('reports which models read images', async () => {
+    mockFetch(
+      jsonResponse({
+        data: [
+          { id: 'v/see', name: 'Sees', architecture: { input_modalities: ['text', 'image', 'file'], output_modalities: ['text'] } },
+          { id: 't/text', name: 'Text', architecture: { input_modalities: ['text'], output_modalities: ['text'] } },
+        ],
+      }),
+    )
+    const models = await openrouter.listModels(null)
+    expect(models.map((m) => m.inputs)).toEqual([{ image: true, pdf: true }, { image: false, pdf: false }])
+
+    mockFetch(jsonResponse({ data: [{ id: 'gpt-5' }, { id: 'gpt-3.5-turbo' }] }))
+    expect((await openai.listModels('sk')).map((m) => [m.id, m.inputs?.image])).toEqual([
+      ['gpt-5', true],
+      ['gpt-3.5-turbo', false],
+    ])
+  })
+})

@@ -18,11 +18,38 @@ export interface ModelInfo {
   pricing?: { prompt?: string; completion?: string }
   /** Supports streamed reasoning that the app should ask for (Anthropic adaptive thinking). */
   reasoning?: boolean
+  /** What the model can read besides text, when the provider says (absent = unknown). */
+  inputs?: { image?: boolean; pdf?: boolean }
 }
+
+export type ContentPart =
+  | { type: 'text'; text: string }
+  /** Base64 image bytes. */
+  | { type: 'image'; mimeType: string; data: string }
+  /**
+   * A PDF as base64. Providers that read PDFs natively get the file; others
+   * get `text`, the text extracted in the browser.
+   */
+  | { type: 'document'; name: string; data: string; text: string }
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
-  content: string
+  content: string | ContentPart[]
+}
+
+/** A message's content as plain text, for providers or places that only take text. */
+export function textOf(content: ChatMessage['content']): string {
+  if (typeof content === 'string') return content
+  return content
+    .map((p) => (p.type === 'text' ? p.text : p.type === 'document' ? documentAsText(p.name, p.text) : ''))
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+/** How a file's text is shown to a model that doesn't read the file itself. */
+export function documentAsText(name: string, text: string): string {
+  const body = text.trim() || '(No text could be extracted from this file. It may be a scanned document.)'
+  return `<file name="${name.replace(/"/g, "'")}">\n${body}\n</file>`
 }
 
 export interface Usage {

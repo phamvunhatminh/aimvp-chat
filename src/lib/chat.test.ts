@@ -4,9 +4,11 @@ import { useStreams } from '@/stores/streams'
 import { contentChunk, dataEvent, jsonResponse, sseResponse } from '@/test/sse-response'
 import { buildPrompt, editAndResend, regenerate, sendMessage, stopStreaming } from './chat'
 import { db, type Message } from './db'
-import { createConversation, createProject, getConversation, getMessages } from './repo'
+import type { PreparedFile } from './files'
+import { createConversation, createProject, deleteConversation, getConversation, getMessages } from './repo'
 
 beforeEach(async () => {
+  await db.blobs.clear()
   await db.projects.clear()
   await db.conversations.clear()
   await db.messages.clear()
@@ -154,6 +156,52 @@ describe('projects', () => {
   })
 })
 
+describe('attachments', () => {
+  const image: PreparedFile = {
+    attachment: { id: 'img', kind: 'image', name: 'cat.jpg', mimeType: 'image/jpeg', size: 3, text: '', width: 1, height: 1 },
+    data: new Uint8Array([1, 2, 3]).buffer,
+  }
+  const pdf: PreparedFile = {
+    attachment: { id: 'pdf', kind: 'file', name: 'spec.pdf', mimeType: 'application/pdf', size: 4, text: 'PDF text' },
+    data: new Uint8Array([37, 80, 68, 70]).buffer,
+  }
+  const notes: PreparedFile = {
+    attachment: { id: 'txt', kind: 'file', name: 'notes.md', mimeType: 'text/markdown', size: 5, text: 'hello' },
+    data: null,
+  }
+
+  it('stores files and sends them with the message', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(reply('ok'))
+    vi.stubGlobal('fetch', fetchMock)
+    const c = await createConversation({ model: 'm/x', systemPrompt: '' })
+    await sendMessage(c.id, 'What is this?', [image, pdf, notes])
+
+    const [user] = await getMessages(c.id)
+    expect(user.attachments.map((a) => [a.name, a.blobId !== null])).toEqual([
+      ['cat.jpg', true],
+      ['spec.pdf', true],
+      ['notes.md', false],
+    ])
+    expect(await db.blobs.count()).toBe(2)
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).messages[0].content).toEqual([
+      { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AQID' } },
+      { type: 'text', text: '<file name="spec.pdf">\nPDF text\n</file>' },
+      { type: 'text', text: '<file name="notes.md">\nhello\n</file>' },
+      { type: 'text', text: 'What is this?' },
+    ])
+  })
+
+  it('titles a files-only chat after the first file and deletes stored files with the chat', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply('ok')))
+    const c = await createConversation({ model: 'm/x', systemPrompt: '' })
+    await sendMessage(c.id, '', [image])
+    expect((await getConversation(c.id))?.title).toBe('cat.jpg')
+    expect(await db.blobs.count()).toBe(1)
+    await deleteConversation(c.id)
+    expect(await db.blobs.count()).toBe(0)
+  })
+})
+
 describe('regenerate and edit', () => {
   it('regenerate replaces the last reply', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(reply('first')).mockResolvedValueOnce(reply('second')))
@@ -187,11 +235,11 @@ describe('regenerate and edit', () => {
 })
 
 describe('buildPrompt', () => {
-  it('skips failed and empty replies and blank system prompts', () => {
+  it('skips failed and empty replies and blank system prompts', async () => {
     const m = (role: Message['role'], content: string, status: Message['status'] = 'done') =>
       ({ role, content, status }) as Message
     expect(
-      buildPrompt(['  ', ''], [m('user', 'a'), m('assistant', 'oops', 'error'), m('assistant', ''), m('assistant', 'b')]),
+      await buildPrompt(['  ', ''], [m('user', 'a'), m('assistant', 'oops', 'error'), m('assistant', ''), m('assistant', 'b')]),
     ).toEqual([
       { role: 'user', content: 'a' },
       { role: 'assistant', content: 'b' },

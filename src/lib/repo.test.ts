@@ -7,6 +7,7 @@ import {
   deleteProject,
   getProject,
   listProjects,
+  saveBlob,
   updateConversation,
   updateProject,
   deleteConversation,
@@ -23,6 +24,7 @@ import {
 } from './repo'
 
 beforeEach(async () => {
+  await db.blobs.clear()
   await db.projects.clear()
   await db.conversations.clear()
   await db.messages.clear()
@@ -137,6 +139,26 @@ describe('export / import', () => {
     const legacy = { ...file, projects: undefined, conversations: [{ ...file.conversations[0], id: 'old', projectId: undefined }] }
     await importData(legacy)
     expect((await getConversation('old'))?.projectId).toBeNull()
+  })
+
+  it('round-trips attached images', async () => {
+    const c = await createConversation({ model: 'm', systemPrompt: '' })
+    const blobId = await saveBlob(new Uint8Array([9, 8, 7]).buffer, 'image/png')
+    await addMessage({
+      conversationId: c.id,
+      role: 'user',
+      content: 'look',
+      attachments: [{ id: 'a', kind: 'image', name: 'x.png', mimeType: 'image/png', size: 3, text: '', blobId }],
+    })
+    const file = JSON.parse(JSON.stringify(await exportData()))
+    expect(file.blobs).toEqual([{ id: blobId, mimeType: 'image/png', data: 'CQgH' }])
+
+    await db.blobs.clear()
+    await db.messages.clear()
+    await importData(file)
+    const blob = await db.blobs.get(blobId)
+    expect(Array.from(new Uint8Array(blob!.data))).toEqual([9, 8, 7])
+    expect((await getMessages(c.id))[0].attachments[0]).toMatchObject({ name: 'x.png', blobId })
   })
 
   it('rejects files that are not aimvp exports', async () => {

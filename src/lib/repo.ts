@@ -1,5 +1,6 @@
 import Dexie from 'dexie'
-import { db, type Conversation, type Message, type Project } from './db'
+import { base64ToBytes, bytesToBase64 } from './base64'
+import { db, type Attachment, type Conversation, type Message, type Project, type StoredBlob } from './db'
 import { normalizeModelRef } from './providers'
 import { newId } from './utils'
 
@@ -116,12 +117,16 @@ export async function updateConversation(
     .modify({ ...patch, updatedAt: now() })
 }
 
-/** Tombstones the conversation and its messages, wiping their content. */
+/** Fields wiped from a tombstoned message, so deleted content doesn't linger. */
+const WIPED = { content: '', reasoning: '', attachments: [] as Attachment[] }
+
+/** Tombstones the conversation and its messages, wiping their content and files. */
 export async function deleteConversation(id: string): Promise<void> {
-  await db.transaction('rw', db.conversations, db.messages, async () => {
+  await db.transaction('rw', db.conversations, db.messages, db.blobs, async () => {
     const t = now()
     await db.conversations.update(id, { title: '', systemPrompt: '', updatedAt: t, deletedAt: t })
-    await messagesOf(id).modify({ content: '', reasoning: '', updatedAt: t, deletedAt: t })
+    await deleteBlobsOf(await messagesOf(id).toArray())
+    await messagesOf(id).modify({ ...WIPED, updatedAt: t, deletedAt: t })
   })
 }
 
@@ -144,6 +149,7 @@ export async function addMessage(
 ): Promise<Message> {
   const t = now()
   const message: Message = {
+    attachments: [],
     reasoning: '',
     model: null,
     status: 'done',
@@ -161,7 +167,7 @@ export async function addMessage(
 
 export async function updateMessage(
   id: string,
-  patch: Partial<Pick<Message, 'content' | 'reasoning' | 'status' | 'error' | 'usage'>>,
+  patch: Partial<Pick<Message, 'content' | 'attachments' | 'reasoning' | 'status' | 'error' | 'usage'>>,
 ): Promise<void> {
   await db.messages
     .where('id')
@@ -170,15 +176,34 @@ export async function updateMessage(
     .modify({ ...patch, updatedAt: now() })
 }
 
-/** Tombstones messages matching `predicate` in a conversation. */
+/** Tombstones messages matching `predicate` in a conversation, deleting their files. */
 export async function deleteMessages(
   conversationId: string,
   predicate: (m: Message) => boolean,
 ): Promise<void> {
   const t = now()
-  await messagesOf(conversationId)
-    .filter((m) => !m.deletedAt && predicate(m))
-    .modify({ content: '', reasoning: '', updatedAt: t, deletedAt: t })
+  await db.transaction('rw', db.messages, db.blobs, async () => {
+    const matching = messagesOf(conversationId).filter((m) => !m.deletedAt && predicate(m))
+    await deleteBlobsOf(await matching.toArray())
+    await matching.modify({ ...WIPED, updatedAt: t, deletedAt: t })
+  })
+}
+
+// --- Blobs -----------------------------------------------------------------
+
+export async function saveBlob(data: ArrayBuffer, mimeType: string): Promise<string> {
+  const id = newId()
+  await db.blobs.add({ id, mimeType, data, createdAt: now() })
+  return id
+}
+
+export function getBlob(id: string): Promise<StoredBlob | undefined> {
+  return db.blobs.get(id)
+}
+
+async function deleteBlobsOf(messages: Message[]): Promise<void> {
+  const ids = messages.flatMap((m) => (m.attachments ?? []).map((a) => a.blobId).filter((id) => id !== null))
+  if (ids.length) await db.blobs.bulkDelete(ids)
 }
 
 /** Marks replies left `streaming` by a closed tab as interrupted. */
@@ -192,6 +217,13 @@ export async function recoverInterruptedMessages(): Promise<void> {
 
 // --- Export / import -------------------------------------------------------
 
+export interface ExportedBlob {
+  id: string
+  mimeType: string
+  /** Base64 of the bytes. */
+  data: string
+}
+
 export interface ExportFile {
   app: 'aimvp'
   version: 1
@@ -200,6 +232,8 @@ export interface ExportFile {
   projects?: Project[]
   conversations: Conversation[]
   messages: Message[]
+  /** Images and PDFs referenced by message attachments; absent in older exports. */
+  blobs?: ExportedBlob[]
 }
 
 export async function exportData(): Promise<ExportFile> {
@@ -208,7 +242,11 @@ export async function exportData(): Promise<ExportFile> {
     db.conversations.filter((c) => !c.deletedAt).toArray(),
     db.messages.filter((m) => !m.deletedAt).toArray(),
   ])
-  return { app: 'aimvp', version: 1, exportedAt: Date.now(), projects, conversations, messages }
+  const blobIds = messages.flatMap((m) => m.attachments.map((a) => a.blobId).filter((id) => id !== null))
+  const blobs = (await db.blobs.bulkGet(blobIds))
+    .filter((b) => b !== undefined)
+    .map((b) => ({ id: b.id, mimeType: b.mimeType, data: bytesToBase64(b.data) }))
+  return { app: 'aimvp', version: 1, exportedAt: Date.now(), projects, conversations, messages, blobs }
 }
 
 const isString = (v: unknown): v is string => typeof v === 'string'
@@ -244,6 +282,22 @@ function toConversation(raw: unknown): Conversation | null {
   }
 }
 
+function toAttachment(raw: unknown): Attachment | null {
+  const r = raw as Record<string, unknown>
+  if (!r || !isString(r.id) || !isString(r.name) || !isString(r.mimeType)) return null
+  if (r.kind !== 'image' && r.kind !== 'file') return null
+  return {
+    id: r.id,
+    kind: r.kind,
+    name: r.name,
+    mimeType: r.mimeType,
+    size: isNumber(r.size) ? r.size : 0,
+    text: isString(r.text) ? r.text : '',
+    blobId: isString(r.blobId) ? r.blobId : null,
+    ...(isNumber(r.width) && isNumber(r.height) ? { width: r.width, height: r.height } : {}),
+  }
+}
+
 function toMessage(raw: unknown): Message | null {
   const r = raw as Record<string, unknown>
   if (!r || !isString(r.id) || !isString(r.conversationId) || !isString(r.content)) return null
@@ -255,6 +309,7 @@ function toMessage(raw: unknown): Message | null {
     conversationId: r.conversationId,
     role: r.role,
     content: r.content,
+    attachments: (Array.isArray(r.attachments) ? r.attachments : []).map(toAttachment).filter((a) => a !== null),
     reasoning: isString(r.reasoning) ? r.reasoning : '',
     model: isString(r.model) ? normalizeModelRef(r.model) : null,
     status,
@@ -277,8 +332,16 @@ export async function importData(
   const projects = (Array.isArray(f.projects) ? f.projects : []).map(toProject).filter((p) => p !== null)
   const conversations = f.conversations.map(toConversation).filter((c) => c !== null)
   const messages = f.messages.map(toMessage).filter((m) => m !== null)
+  const blobs: StoredBlob[] = (Array.isArray(f.blobs) ? f.blobs : []).flatMap((b) => {
+    if (!b || !isString(b.id) || !isString(b.mimeType) || !isString(b.data)) return []
+    try {
+      return [{ id: b.id, mimeType: b.mimeType, data: base64ToBytes(b.data).buffer, createdAt: Date.now() }]
+    } catch {
+      return []
+    }
+  })
 
-  return db.transaction('rw', db.projects, db.conversations, db.messages, async () => {
+  return db.transaction('rw', [db.projects, db.conversations, db.messages, db.blobs], async () => {
     const newer = <T extends { id: string; updatedAt: number }>(incoming: T[], existing: (T | undefined)[]) =>
       incoming.filter((r, i) => !existing[i] || existing[i].updatedAt < r.updatedAt)
 
@@ -288,12 +351,16 @@ export async function importData(
     await db.projects.bulkPut(keptProjects)
     await db.conversations.bulkPut(keptConversations)
     await db.messages.bulkPut(keptMessages)
+    // Blobs are immutable and keyed by id, so existing ones can simply be kept.
+    const existingBlobs = await db.blobs.bulkGet(blobs.map((b) => b.id))
+    await db.blobs.bulkAdd(blobs.filter((_, i) => !existingBlobs[i]))
     return { projects: keptProjects.length, conversations: keptConversations.length, messages: keptMessages.length }
   })
 }
 
 export async function deleteAllData(): Promise<void> {
-  await db.transaction('rw', db.projects, db.conversations, db.messages, async () => {
+  await db.transaction('rw', [db.projects, db.conversations, db.messages, db.blobs], async () => {
+    await db.blobs.clear()
     await db.projects.clear()
     await db.conversations.clear()
     await db.messages.clear()

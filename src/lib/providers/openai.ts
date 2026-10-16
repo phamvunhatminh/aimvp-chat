@@ -1,5 +1,5 @@
 import { httpError, readErrorBody, type ApiErrorBody } from './errors'
-import { streamChatCompletions } from './openai-compatible'
+import { streamChatCompletions, toChatCompletionsMessages } from './openai-compatible'
 import type { ModelInfo, ProviderClient } from './types'
 
 const OPENAI_API = 'https://api.openai.com/v1'
@@ -8,6 +8,9 @@ const OPENAI_API = 'https://api.openai.com/v1'
 // keep the ones that work with streaming Chat Completions.
 const CHAT_MODEL = /^(gpt-|chatgpt-|o\d)/
 const NOT_CHAT = /(audio|realtime|transcribe|tts|image|embedding|moderation|instruct|codex|computer-use|deep-research|-pro\b)/
+
+// OpenAI's model list carries no capabilities; these families accept images.
+const VISION_MODEL = /^(gpt-4o|gpt-4\.1|gpt-4\.5|gpt-5|chatgpt-4o|o1(?!-mini)|o3|o4)/
 
 /** OpenAI reports an empty balance as 429 `insufficient_quota`. */
 function normalizeStatus(status: number | null, error: ApiErrorBody) {
@@ -24,7 +27,7 @@ export const openai: ProviderClient = {
     const body = (await res.json()) as { data: { id: string; created?: number }[] }
     return body.data
       .filter((m) => CHAT_MODEL.test(m.id) && !NOT_CHAT.test(m.id))
-      .map((m): ModelInfo => ({ id: m.id, name: m.id, created: m.created }))
+      .map((m): ModelInfo => ({ id: m.id, name: m.id, created: m.created, inputs: { image: VISION_MODEL.test(m.id) } }))
       .sort((a, b) => (b.created ?? 0) - (a.created ?? 0))
   },
 
@@ -37,7 +40,7 @@ export const openai: ProviderClient = {
       provider: 'openai',
       url: `${OPENAI_API}/chat/completions`,
       apiKey,
-      body: { model, messages, stream: true, stream_options: { include_usage: true } },
+      body: { model, messages: toChatCompletionsMessages(messages), stream: true, stream_options: { include_usage: true } },
       signal,
       normalizeStatus,
     })

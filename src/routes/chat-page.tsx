@@ -1,4 +1,5 @@
-import { useEffect } from 'react'
+import { PaperclipIcon } from 'lucide-react'
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { ChatHeader } from '@/components/chat/chat-header'
 import { Composer } from '@/components/chat/composer'
@@ -9,9 +10,11 @@ import { ProjectOverview } from '@/components/project-overview'
 import { Button } from '@/components/ui/button'
 import { useConversation, useMessages, useProject } from '@/hooks/use-data'
 import { sendMessage, stopStreaming } from '@/lib/chat'
+import type { PreparedFile } from '@/lib/files'
 import { parseModelRef, PROVIDERS } from '@/lib/providers'
 import { createConversation, updateConversation } from '@/lib/repo'
 import { useModelName } from '@/stores/models'
+import { addFiles } from '@/stores/composer'
 import { connectedProviders, useSettings } from '@/stores/settings'
 import { useIsStreaming } from '@/stores/streams'
 import { useUI } from '@/stores/ui'
@@ -55,19 +58,19 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
   const hasAnyKey = connectedProviders(apiKeys).length > 0
   const needsKey = hasAnyKey && !apiKeys[parseModelRef(model).provider]
 
-  async function handleSend(text: string) {
+  async function handleSend(text: string, files: PreparedFile[]) {
     if (conversation) {
-      void sendMessage(conversation.id, text)
+      void sendMessage(conversation.id, text, files)
       return
     }
     const created = await createConversation({ model, systemPrompt, projectId: newChatProjectId ?? null })
     resetDraft()
     navigate(`/c/${created.id}`)
-    void sendMessage(created.id, text)
+    void sendMessage(created.id, text, files)
   }
 
   return (
-    <>
+    <FileDropZone enabled={hasAnyKey}>
       <ChatHeader
         model={model}
         onModelChange={(next) =>
@@ -98,15 +101,56 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
       {needsKey && <MissingKeyNotice modelRef={model} />}
       {hasAnyKey ? (
         <Composer
-          onSend={(text) => void handleSend(text)}
+          onSend={(text, files) => void handleSend(text, files)}
           onStop={() => id && stopStreaming(id)}
           streaming={streaming}
+          modelRef={model}
           placeholder={project && newChatProjectId ? `New chat in ${project.name}…` : undefined}
         />
       ) : (
         (hasMessages || newChatProjectId) && <ReconnectBar />
       )}
-    </>
+    </FileDropZone>
+  )
+}
+
+/** Lets files be dropped anywhere on the chat to attach them. */
+function FileDropZone({ enabled, children }: { enabled: boolean; children: ReactNode }) {
+  const [dragging, setDragging] = useState(false)
+  const depth = useRef(0)
+  const hasFiles = (e: DragEvent) => enabled && e.dataTransfer.types.includes('Files')
+
+  return (
+    <div
+      className="relative flex min-h-0 flex-1 flex-col"
+      onDragEnter={(e) => {
+        if (!hasFiles(e)) return
+        depth.current++
+        setDragging(true)
+      }}
+      onDragOver={(e) => {
+        if (hasFiles(e)) e.preventDefault()
+      }}
+      onDragLeave={() => {
+        depth.current = Math.max(0, depth.current - 1)
+        if (depth.current === 0) setDragging(false)
+      }}
+      onDrop={(e) => {
+        if (!hasFiles(e)) return
+        e.preventDefault()
+        depth.current = 0
+        setDragging(false)
+        void addFiles(e.dataTransfer.files)
+      }}
+    >
+      {children}
+      {dragging && (
+        <div className="pointer-events-none absolute inset-2 z-40 flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-ring bg-background/90 text-sm font-medium">
+          <PaperclipIcon className="size-6" />
+          Drop images or files to attach
+        </div>
+      )}
+    </div>
   )
 }
 
