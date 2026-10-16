@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { connectOpenRouter } from '@/lib/connect'
 import { formatCost } from '@/lib/format'
@@ -55,6 +56,7 @@ export function SettingsDialog() {
           <ApiKeysSection />
           <DefaultsSection />
           <VoiceSection />
+          <UsageSection />
           <AppearanceSection />
           <DataSection />
         </div>
@@ -352,6 +354,60 @@ function EngineChoice({
         ))}
       </div>
     </div>
+  )
+}
+
+function UsageSection() {
+  const showUsage = useSettings((s) => s.showUsageInSidebar)
+  const budget = useSettings((s) => s.monthlyBudget)
+  const setUsagePrefs = useSettings((s) => s.setUsagePrefs)
+  const setSettingsOpen = useUI((s) => s.setSettingsOpen)
+  const navigate = useNavigate()
+  const [budgetText, setBudgetText] = useState(budget === null ? '' : String(budget))
+
+  function saveBudget(text: string) {
+    const value = Number(text.replace(',', '.'))
+    setUsagePrefs({ monthlyBudget: text.trim() && Number.isFinite(value) && value > 0 ? value : null })
+  }
+
+  return (
+    <Section title="Usage" description="Spend, tokens and speed, worked out from your chats in this browser.">
+      <div className="flex items-center justify-between gap-4">
+        <Label htmlFor="show-usage" className="font-normal">
+          Show this month's usage in the sidebar
+        </Label>
+        <Switch id="show-usage" checked={showUsage} onCheckedChange={(on) => setUsagePrefs({ showUsageInSidebar: on })} />
+      </div>
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="grid gap-2">
+          <Label htmlFor="monthly-budget">Monthly budget</Label>
+          <div className="relative">
+            <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-sm text-muted-foreground">
+              $
+            </span>
+            <Input
+              id="monthly-budget"
+              inputMode="decimal"
+              value={budgetText}
+              onChange={(e) => setBudgetText(e.target.value)}
+              onBlur={(e) => saveBudget(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && saveBudget(e.currentTarget.value)}
+              placeholder="None"
+              className="w-32 pl-6"
+            />
+          </div>
+        </div>
+        <Button
+          variant="outline"
+          onClick={() => {
+            setSettingsOpen(false)
+            navigate('/usage')
+          }}
+        >
+          Open usage dashboard
+        </Button>
+      </div>
+    </Section>
   )
 }
 

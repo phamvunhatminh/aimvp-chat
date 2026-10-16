@@ -15,7 +15,9 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { editAndResend, regenerate } from '@/lib/chat'
 import type { Message } from '@/lib/db'
+import { usePriceLookup } from '@/hooks/use-usage'
 import { formatCost } from '@/lib/format'
+import { costOf } from '@/lib/pricing'
 import { parseModelRef, PROVIDERS, type Source } from '@/lib/providers'
 import { readAloud, stopReading, useCanReadAloud, useReadAloud } from '@/lib/read-aloud'
 import { deriveTitle } from '@/lib/repo'
@@ -266,11 +268,13 @@ function ReadAloudButton({ messageId, content }: { messageId: string; content: s
 }
 
 function MessageMeta({ message }: { message: Message }) {
+  const price = usePriceLookup()
   const ref = message.model ? parseModelRef(message.model) : null
   const parts = [ref && `${ref.model} · ${PROVIDERS[ref.provider].name}`]
   if (message.usage) {
     parts.push(`${(message.usage.promptTokens + message.usage.completionTokens).toLocaleString()} tokens`)
-    if (message.usage.cost !== undefined) parts.push(formatCost(message.usage.cost))
+    const cost = ref ? costOf(message.usage, price(ref.provider, ref.model)) : null
+    if (cost) parts.push(`${cost.estimated ? '~' : ''}${formatCost(cost.cost)}`)
   }
   const text = parts.filter(Boolean).join(' · ')
   return text ? <span className="ml-1 truncate">{text}</span> : null

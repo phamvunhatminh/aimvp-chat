@@ -1,4 +1,5 @@
 import {
+  ChartColumnIcon,
   FolderIcon,
   FolderInputIcon,
   FolderPlusIcon,
@@ -36,6 +37,8 @@ import type { TextMatch } from '@/lib/search'
 import { cn } from '@/lib/utils'
 import { useIsStreaming } from '@/stores/streams'
 import { useUI } from '@/stores/ui'
+import { UsageWidget } from '@/components/usage/usage-widget'
+import { useSettings } from '@/stores/settings'
 import { MoveToProjectDialog } from './move-to-project-dialog'
 import { ProjectMenu } from './project-menu'
 
@@ -49,6 +52,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [query, setQuery] = useState('')
   const [creatingProject, setCreatingProject] = useState(false)
   const setSettingsOpen = useUI((s) => s.setSettingsOpen)
+  const showUsage = useSettings((s) => s.showUsageInSidebar)
   const { id: activeId } = useParams()
   const navigate = useNavigate()
   const activeProjectId = conversations?.find((c) => c.id === activeId)?.projectId ?? null
@@ -135,10 +139,11 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           ))}
       </nav>
 
-      <div className="shrink-0 border-t p-2 pb-[max(env(safe-area-inset-bottom),0.5rem)]">
+      {showUsage && <UsageWidget onNavigate={onNavigate} />}
+      <div className="flex shrink-0 gap-1 border-t p-2 pb-[max(env(safe-area-inset-bottom),0.5rem)]">
         <Button
           variant="ghost"
-          className="w-full justify-start"
+          className="flex-1 justify-start"
           onClick={() => {
             onNavigate?.()
             setSettingsOpen(true)
@@ -146,6 +151,11 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         >
           <SettingsIcon />
           Settings
+        </Button>
+        <Button variant="ghost" size="icon" className="text-muted-foreground" asChild>
+          <NavLink to="/usage" onClick={onNavigate} aria-label="Usage" title="Usage">
+            <ChartColumnIcon />
+          </NavLink>
         </Button>
       </div>
 

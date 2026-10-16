@@ -23,12 +23,17 @@ interface SettingsState {
   speechVoice: string
   /** BCP 47 tag such as `vi-VN`, or '' to follow the browser. */
   speechLanguage: string
+  /** Show this month's spend in the sidebar. */
+  showUsageInSidebar: boolean
+  /** USD a month, to compare spend against; null for none. */
+  monthlyBudget: number | null
   setApiKey: (provider: ProviderId, apiKey: string | null) => void
   setDefaultModel: (model: string) => void
   setDefaultSystemPrompt: (prompt: string) => void
   toggleFavoriteModel: (model: string) => void
   setTheme: (theme: Theme) => void
   setSpeech: (speech: Partial<Pick<SettingsState, 'speechInput' | 'speechOutput' | 'speechVoice' | 'speechLanguage'>>) => void
+  setUsagePrefs: (prefs: Partial<Pick<SettingsState, 'showUsageInSidebar' | 'monthlyBudget'>>) => void
 }
 
 type PersistedSettings = Pick<
@@ -42,6 +47,8 @@ type PersistedSettings = Pick<
   | 'speechOutput'
   | 'speechVoice'
   | 'speechLanguage'
+  | 'showUsageInSidebar'
+  | 'monthlyBudget'
 >
 
 /** Providers the user has a key for, in display order. */
@@ -77,6 +84,8 @@ export const useSettings = create<SettingsState>()(
       speechOutput: 'browser',
       speechVoice: 'alloy',
       speechLanguage: '',
+      showUsageInSidebar: true,
+      monthlyBudget: null,
       setApiKey: (provider, apiKey) =>
         set((s) => {
           const apiKeys = { ...s.apiKeys }
@@ -94,6 +103,7 @@ export const useSettings = create<SettingsState>()(
         })),
       setTheme: (theme) => set({ theme }),
       setSpeech: (speech) => set(speech),
+      setUsagePrefs: (prefs) => set(prefs),
     }),
     {
       // public/theme-init.js reads `state.theme` from this key before first paint.
@@ -110,6 +120,8 @@ export const useSettings = create<SettingsState>()(
         speechOutput: s.speechOutput,
         speechVoice: s.speechVoice,
         speechLanguage: s.speechLanguage,
+        showUsageInSidebar: s.showUsageInSidebar,
+        monthlyBudget: s.monthlyBudget,
       }),
     },
   ),

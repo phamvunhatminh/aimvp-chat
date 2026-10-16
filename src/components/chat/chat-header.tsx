@@ -15,6 +15,7 @@ export function ChatHeader({
   onSystemPromptChange,
   project,
   onDownloadMarkdown,
+  usageNote,
 }: {
   model: string
   onModelChange: (model: string) => void
@@ -24,6 +25,8 @@ export function ChatHeader({
   project?: Project | null
   /** Set once the chat exists: enables the download menu. */
   onDownloadMarkdown?: () => void
+  /** What this chat has used so far, e.g. "~$0.02 · 12k tokens". */
+  usageNote?: string
 }) {
   const setSidebarOpen = useUI((s) => s.setSidebarOpen)
 
@@ -71,6 +74,11 @@ export function ChatHeader({
                 <PrinterIcon />
                 Print or save as PDF
               </DropdownMenuItem>
+              {usageNote && (
+                <p className="mt-1 border-t px-2 pt-2 pb-1 text-xs text-muted-foreground tabular-nums">
+                  This chat: {usageNote}
+                </p>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         )}

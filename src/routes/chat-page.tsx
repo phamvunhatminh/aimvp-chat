@@ -17,6 +17,9 @@ import { parseModelRef, PROVIDERS } from '@/lib/providers'
 import { stopReading } from '@/lib/read-aloud'
 import { createConversation, updateConversation } from '@/lib/repo'
 import { cn } from '@/lib/utils'
+import { usePriceLookup } from '@/hooks/use-usage'
+import { formatCost, formatTokens } from '@/lib/format'
+import { chatTotals } from '@/lib/usage'
 import { useModelInfo, useModelName } from '@/stores/models'
 import { addFiles } from '@/stores/composer'
 import { connectedProviders, useSettings } from '@/stores/settings'
@@ -46,6 +49,7 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
   const modelInfo = useModelInfo(conversation?.model ?? draft.model ?? defaultModel)
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const price = usePriceLookup()
 
   useEffect(() => {
     const name = conversation?.title ?? (newChatProjectId ? project?.name : undefined)
@@ -67,6 +71,7 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
   const canSearch = !modelInfo?.outputs?.image && modelInfo?.webSearch !== false
   const hasMessages = !!messages && messages.length > 0
   const hasAnyKey = connectedProviders(apiKeys).length > 0
+  const totals = messages ? chatTotals(messages, price) : null
   const needsKey = hasAnyKey && !apiKeys[parseModelRef(model).provider]
 
   async function handleSend(text: string, files: PreparedFile[]) {
@@ -95,6 +100,7 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
         }
         // The project page already shows its name, so the header link is for chats in it.
         project={newChatProjectId ? null : project}
+        usageNote={totals ? usageNote(totals) : undefined}
         onDownloadMarkdown={
           conversation && hasMessages
             ? () =>
@@ -152,6 +158,13 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
       )}
     </FileDropZone>
   )
+}
+
+/** "~$0.02 · 12k tokens", or nothing before the chat has used any. */
+function usageNote({ tokens, cost, estimated }: ReturnType<typeof chatTotals>): string | undefined {
+  if (tokens === 0) return undefined
+  const spend = cost > 0 ? `${estimated ? '~' : ''}${formatCost(cost)} · ` : ''
+  return `${spend}${formatTokens(tokens)} tokens`
 }
 
 /** Lets the model search the web for this chat's replies. */
