@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "aimvp-chat",
+  "compatibility_date": "2026-10-01",
+  // Static SPA: no Worker script yet. Unknown paths fall back to index.html.
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  },
+  "routes": [{ "pattern": "aimvp.app", "custom_domain": true }]
+}
