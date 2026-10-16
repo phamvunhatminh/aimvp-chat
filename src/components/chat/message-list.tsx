@@ -38,10 +38,10 @@ export function MessageList({ messages, busy }: { messages: Message[]; busy: boo
   }, [last?.id, last?.role])
 
   return (
-    <div className="relative min-h-0 flex-1">
+    <div className="relative min-h-0 flex-1 print:block">
       <div
         ref={scrollRef}
-        className="h-full overflow-y-auto overscroll-contain"
+        className="h-full overflow-y-auto overscroll-contain print:h-auto print:overflow-visible"
         onScroll={(e) => {
           const el = e.currentTarget
           const distance = el.scrollHeight - el.scrollTop - el.clientHeight
@@ -59,7 +59,7 @@ export function MessageList({ messages, busy }: { messages: Message[]; busy: boo
         <Button
           variant="outline"
           size="icon"
-          className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full shadow-md"
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full shadow-md print:hidden"
           onClick={() => {
             stickToBottom.current = true
             scrollToBottom('smooth')

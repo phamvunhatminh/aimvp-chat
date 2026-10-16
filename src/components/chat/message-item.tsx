@@ -14,7 +14,7 @@ import { useStreams } from '@/stores/streams'
 const Markdown = lazy(() => import('@/components/markdown').then((m) => ({ default: m.Markdown })))
 
 const actionRow =
-  'flex items-center gap-0.5 text-xs text-muted-foreground transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-within:opacity-100'
+  'flex items-center gap-0.5 text-xs text-muted-foreground transition-opacity print:hidden [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:focus-within:opacity-100'
 
 export function MessageItem({
   message,

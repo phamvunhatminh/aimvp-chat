@@ -50,7 +50,7 @@ export function Composer({
   }
 
   return (
-    <div className="shrink-0 px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] sm:px-4">
+    <div className="shrink-0 px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] sm:px-4 print:hidden">
       <form
         onSubmit={(e) => {
           e.preventDefault()

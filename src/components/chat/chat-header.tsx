@@ -1,7 +1,8 @@
-import { FolderIcon, MenuIcon, SquarePenIcon } from 'lucide-react'
+import { FileDownIcon, FolderIcon, MenuIcon, MoreHorizontalIcon, PrinterIcon, SquarePenIcon } from 'lucide-react'
 import { Link } from 'react-router'
 import { ModelPicker } from '@/components/model-picker'
 import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import type { Project } from '@/lib/db'
 import { cn } from '@/lib/utils'
 import { useUI } from '@/stores/ui'
@@ -13,6 +14,7 @@ export function ChatHeader({
   systemPrompt,
   onSystemPromptChange,
   project,
+  onDownloadMarkdown,
 }: {
   model: string
   onModelChange: (model: string) => void
@@ -20,11 +22,13 @@ export function ChatHeader({
   onSystemPromptChange: (prompt: string) => void
   /** The project this chat belongs to (or will be created in). */
   project?: Project | null
+  /** Set once the chat exists: enables the download menu. */
+  onDownloadMarkdown?: () => void
 }) {
   const setSidebarOpen = useUI((s) => s.setSidebarOpen)
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-1 px-2 sm:px-3">
+    <header className="flex h-14 shrink-0 items-center gap-1 px-2 sm:px-3 print:hidden">
       <Button
         variant="ghost"
         size="icon"
@@ -51,6 +55,25 @@ export function ChatHeader({
           </Link>
         )}
         <SystemPromptDialog value={systemPrompt} onSave={onSystemPromptChange} />
+        {onDownloadMarkdown && (
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="text-muted-foreground" aria-label="Chat options">
+                <MoreHorizontalIcon />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={onDownloadMarkdown}>
+                <FileDownIcon />
+                Download as Markdown
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => window.print()}>
+                <PrinterIcon />
+                Print or save as PDF
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         <Button variant="ghost" size="icon" className="md:hidden" asChild>
           <Link to={project ? `/p/${project.id}` : '/'} aria-label="New chat">
             <SquarePenIcon />

@@ -10,6 +10,8 @@ import { ProjectOverview } from '@/components/project-overview'
 import { Button } from '@/components/ui/button'
 import { useConversation, useMessages, useProject } from '@/hooks/use-data'
 import { sendMessage, stopStreaming } from '@/lib/chat'
+import { downloadFile } from '@/lib/download'
+import { conversationToMarkdown, slugify } from '@/lib/export-chat'
 import type { PreparedFile } from '@/lib/files'
 import { parseModelRef, PROVIDERS } from '@/lib/providers'
 import { createConversation, updateConversation } from '@/lib/repo'
@@ -84,7 +86,18 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
         }
         // The project page already shows its name, so the header link is for chats in it.
         project={newChatProjectId ? null : project}
+        onDownloadMarkdown={
+          conversation && hasMessages
+            ? () =>
+                downloadFile(
+                  conversationToMarkdown(conversation, messages),
+                  `${slugify(conversation.title)}.md`,
+                  'text/markdown',
+                )
+            : undefined
+        }
       />
+      {conversation && <h1 className="mx-auto hidden w-full max-w-3xl px-4 pb-4 text-2xl font-semibold print:block">{conversation.title}</h1>}
 
       {hasMessages ? (
         <MessageList messages={messages} busy={streaming} />

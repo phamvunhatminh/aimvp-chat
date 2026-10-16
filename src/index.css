@@ -226,3 +226,32 @@
 .hljs-strong {
   font-weight: 600;
 }
+
+/* Printing (and "Save as PDF") always uses the light palette and wraps long code. */
+@media print {
+  .dark {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --secondary: oklch(0.97 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.52 0 0);
+    --border: oklch(0.922 0 0);
+    --code-bg: oklch(0.975 0 0);
+    --hl-keyword: #cf222e;
+    --hl-string: #0a3069;
+    --hl-number: #0550ae;
+    --hl-comment: #6e7781;
+    --hl-function: #8250df;
+    --hl-type: #953800;
+    --hl-variable: #116329;
+    color-scheme: light;
+  }
+  .markdown pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .code-block,
+  .markdown table {
+    break-inside: avoid;
+  }
+}
