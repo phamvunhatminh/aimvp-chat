@@ -1,6 +1,6 @@
 import { PaperclipIcon } from 'lucide-react'
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { ChatHeader } from '@/components/chat/chat-header'
 import { Composer } from '@/components/chat/composer'
 import { MessageList } from '@/components/chat/message-list'
@@ -44,6 +44,7 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
   const streaming = useIsStreaming(id)
   const modelInfo = useModelInfo(conversation?.model ?? draft.model ?? defaultModel)
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   useEffect(() => {
     const name = conversation?.title ?? (newChatProjectId ? project?.name : undefined)
@@ -105,7 +106,7 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
       {conversation && <h1 className="mx-auto hidden w-full max-w-3xl px-4 pb-4 text-2xl font-semibold print:block">{conversation.title}</h1>}
 
       {hasMessages ? (
-        <MessageList messages={messages} busy={streaming} />
+        <MessageList messages={messages} busy={streaming} focusMessageId={searchParams.get('m')} />
       ) : project && newChatProjectId ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <ProjectOverview project={project} />

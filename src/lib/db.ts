@@ -11,6 +11,8 @@ export interface Project {
   name: string
   /** Sent with every chat in the project, ahead of the chat's own system prompt. */
   instructions: string
+  /** Documents whose text is sent with every chat in the project, after the instructions. */
+  files: Attachment[]
   createdAt: number
   updatedAt: number
   deletedAt: number | null
@@ -46,6 +48,16 @@ export interface Attachment {
   height?: number
 }
 
+/** A reusable prompt from the prompt library, inserted with `/` in the composer. */
+export interface SavedPrompt {
+  id: string
+  title: string
+  content: string
+  createdAt: number
+  updatedAt: number
+  deletedAt: number | null
+}
+
 /** Binary data kept out of message rows so chat lists stay light. */
 export interface StoredBlob {
   id: string
@@ -76,6 +88,7 @@ export class ChatDB extends Dexie {
   conversations!: EntityTable<Conversation, 'id'>
   messages!: EntityTable<Message, 'id'>
   blobs!: EntityTable<StoredBlob, 'id'>
+  prompts!: EntityTable<SavedPrompt, 'id'>
 
   constructor(name = 'aimvp') {
     super(name)
@@ -118,6 +131,17 @@ export class ChatDB extends Dexie {
           .toCollection()
           .modify((m) => {
             m.attachments ??= []
+          })
+      })
+    // v5: projects carry files, and saved prompts arrive.
+    this.version(5)
+      .stores({ prompts: 'id, updatedAt' })
+      .upgrade(async (tx) => {
+        await tx
+          .table<Project>('projects')
+          .toCollection()
+          .modify((p) => {
+            p.files ??= []
           })
       })
   }

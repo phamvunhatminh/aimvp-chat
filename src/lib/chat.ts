@@ -47,8 +47,15 @@ async function toContentPart(a: Attachment): Promise<ContentPart> {
   return { type: 'text', text: documentAsText(a.name, a.text) }
 }
 
+/** A project's files as one section of the system prompt. */
+export function projectFilesPrompt(files: Attachment[]): string {
+  if (files.length === 0) return ''
+  const header = 'Project files, for reference in every chat of this project:'
+  return [header, ...files.map((f) => documentAsText(f.name, f.text))].join('\n\n')
+}
+
 /**
- * The request messages: project instructions first, then the chat's own system
+ * The request messages: project instructions and files first, then the chat's own system
  * prompt (blank parts dropped), then the history with each user message's files.
  */
 export async function buildPrompt(systemPrompts: string[], history: Message[]): Promise<ChatMessage[]> {
@@ -177,7 +184,10 @@ async function runCompletion(conversationId: string): Promise<void> {
       apiKey,
       model,
       modelInfo: findModel(provider, model),
-      messages: await buildPrompt([project?.instructions ?? '', conversation.systemPrompt], history),
+      messages: await buildPrompt(
+        [project?.instructions ?? '', projectFilesPrompt(project?.files ?? []), conversation.systemPrompt],
+        history,
+      ),
       signal: controller.signal,
     })
     for await (const event of stream) {

@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { useBlobUrl } from '@/hooks/use-blob-url'
 import type { Attachment } from '@/lib/db'
 import { downloadUrl } from '@/lib/download'
-import { formatBytes } from '@/lib/files'
+import { describeFile } from '@/lib/files'
 import { cn } from '@/lib/utils'
 import { removeFile, type PendingFile } from '@/stores/composer'
 
@@ -14,7 +14,17 @@ function FileIcon({ mimeType, className }: { mimeType: string; className?: strin
   return <Icon className={cn('size-4 shrink-0', className)} />
 }
 
-function FileChip({ name, detail, mimeType, children }: { name: string; detail: string; mimeType: string; children?: React.ReactNode }) {
+export function FileChip({
+  name,
+  detail,
+  mimeType,
+  children,
+}: {
+  name: string
+  detail: string
+  mimeType: string
+  children?: React.ReactNode
+}) {
   return (
     <div className="flex h-14 max-w-56 min-w-0 items-center gap-2 rounded-xl border bg-background px-3 text-left">
       <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted">
@@ -29,10 +39,6 @@ function FileChip({ name, detail, mimeType, children }: { name: string; detail: 
   )
 }
 
-function fileDetail(a: Pick<Attachment, 'mimeType' | 'size' | 'text'>) {
-  const type = a.mimeType === 'application/pdf' ? 'PDF' : a.mimeType.includes('word') ? 'Word' : a.mimeType.includes('sheet') ? 'Excel' : 'Text'
-  return `${type} · ${formatBytes(a.size)}`
-}
 
 /** Files waiting in the composer. */
 export function PendingAttachments({ files }: { files: PendingFile[] }) {
@@ -66,7 +72,7 @@ export function PendingAttachments({ files }: { files: PendingFile[] }) {
             {a.kind === 'image' && f.previewUrl ? (
               <img src={f.previewUrl} alt={a.name} className="size-14 rounded-xl border object-cover" />
             ) : (
-              <FileChip name={a.name} detail={fileDetail(a)} mimeType={a.mimeType} />
+              <FileChip name={a.name} detail={describeFile(a)} mimeType={a.mimeType} />
             )}
             {remove}
           </div>
@@ -93,7 +99,7 @@ export function MessageAttachments({ attachments, align = 'start' }: { attachmen
       {files.length > 0 && (
         <div className={cn('flex flex-wrap gap-2', align === 'end' && 'justify-end')}>
           {files.map((a) => (
-            <FileChip key={a.id} name={a.name} detail={fileDetail(a)} mimeType={a.mimeType} />
+            <FileChip key={a.id} name={a.name} detail={describeFile(a)} mimeType={a.mimeType} />
           ))}
         </div>
       )}

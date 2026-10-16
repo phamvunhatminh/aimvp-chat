@@ -1,4 +1,13 @@
-import { AlertCircleIcon, BrainIcon, Loader2Icon, PencilIcon, RefreshCwIcon, SquareIcon, Volume2Icon } from 'lucide-react'
+import {
+  AlertCircleIcon,
+  BookmarkPlusIcon,
+  BrainIcon,
+  Loader2Icon,
+  PencilIcon,
+  RefreshCwIcon,
+  SquareIcon,
+  Volume2Icon,
+} from 'lucide-react'
 import { lazy, Suspense, useState } from 'react'
 import { CopyButton } from '@/components/copy-button'
 import { Button } from '@/components/ui/button'
@@ -8,7 +17,9 @@ import type { Message } from '@/lib/db'
 import { formatCost } from '@/lib/format'
 import { parseModelRef, PROVIDERS } from '@/lib/providers'
 import { readAloud, stopReading, useCanReadAloud, useReadAloud } from '@/lib/read-aloud'
+import { deriveTitle } from '@/lib/repo'
 import { useStreams } from '@/stores/streams'
+import { useUI } from '@/stores/ui'
 import { MessageAttachments } from './attachments'
 
 // The markdown + syntax highlighting stack is most of the bundle; load it on demand.
@@ -36,6 +47,7 @@ export function MessageItem({
 function UserMessage({ message, busy }: { message: Message; busy: boolean }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(message.content)
+  const openPromptLibrary = useUI((s) => s.openPromptLibrary)
 
   if (editing) {
     return (
@@ -76,6 +88,18 @@ function UserMessage({ message, busy }: { message: Message; busy: boolean }) {
       )}
       <div className={actionRow}>
         <CopyButton getText={() => message.content} />
+        {message.content && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="size-7"
+            onClick={() => openPromptLibrary({ id: null, title: deriveTitle(message.content), content: message.content })}
+            aria-label="Save as prompt"
+            title="Save as prompt"
+          >
+            <BookmarkPlusIcon />
+          </Button>
+        )}
         {!busy && (
           <Button
             variant="ghost"

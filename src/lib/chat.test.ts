@@ -5,7 +5,14 @@ import { contentChunk, dataEvent, jsonResponse, sseResponse } from '@/test/sse-r
 import { buildPrompt, editAndResend, regenerate, sendMessage, stopStreaming } from './chat'
 import { db, type Message } from './db'
 import type { PreparedFile } from './files'
-import { createConversation, createProject, deleteConversation, getConversation, getMessages } from './repo'
+import {
+  addProjectFiles,
+  createConversation,
+  createProject,
+  deleteConversation,
+  getConversation,
+  getMessages,
+} from './repo'
 
 beforeEach(async () => {
   await db.blobs.clear()
@@ -153,6 +160,21 @@ describe('projects', () => {
       { role: 'system', content: 'You help with work.\n\nBe brief.' },
       { role: 'user', content: 'hi' },
     ])
+  })
+
+  it("sends the project's files after its instructions", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(reply('ok'))
+    vi.stubGlobal('fetch', fetchMock)
+    const project = await createProject({ name: 'Work', instructions: 'You help with work.' })
+    await addProjectFiles(project.id, [
+      { id: 'f', kind: 'file', name: 'brief.md', mimeType: 'text/markdown', size: 9, text: '# Brief', blobId: null },
+    ])
+    const c = await createConversation({ model: 'm/x', systemPrompt: '', projectId: project.id })
+    await sendMessage(c.id, 'hi')
+    const [system] = JSON.parse(fetchMock.mock.calls[0][1].body).messages
+    expect(system.content).toBe(
+      'You help with work.\n\nProject files, for reference in every chat of this project:\n\n<file name="brief.md">\n# Brief\n</file>',
+    )
   })
 })
 

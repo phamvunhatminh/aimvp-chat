@@ -16,3 +16,15 @@ export function formatCost(usd: number): string {
   if (usd < 0.01) return `$${usd.toFixed(4)}`
   return `$${usd.toFixed(2)}`
 }
+
+/** Rough token count of text: about four characters per token for English. */
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4)
+}
+
+/** 950, 1.2k, 34k, 1.5M. */
+export function formatTokens(tokens: number): string {
+  if (tokens < 1000) return String(tokens)
+  if (tokens < 1_000_000) return `${Number((tokens / 1000).toFixed(tokens < 10_000 ? 1 : 0))}k`
+  return `${Number((tokens / 1_000_000).toFixed(1))}M`
+}

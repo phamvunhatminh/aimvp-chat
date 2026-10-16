@@ -35,6 +35,7 @@ import { fetchKeyInfo, type KeyInfo } from '@/lib/providers/openrouter'
 import { deleteAllData, exportData, importData } from '@/lib/repo'
 import { browserRecognition, canSpeakInBrowser, OPENAI_VOICES, resolveEngine, SPEECH_LANGUAGES } from '@/lib/speech'
 import { cn } from '@/lib/utils'
+import { usePrompts } from '@/hooks/use-data'
 import { useSettings, type SpeechEngine, type Theme } from '@/stores/settings'
 import { useStreams } from '@/stores/streams'
 import { useUI } from '@/stores/ui'
@@ -207,6 +208,8 @@ function DefaultsSection() {
   const setDefaultModel = useSettings((s) => s.setDefaultModel)
   const defaultSystemPrompt = useSettings((s) => s.defaultSystemPrompt)
   const setDefaultSystemPrompt = useSettings((s) => s.setDefaultSystemPrompt)
+  const openPromptLibrary = useUI((s) => s.openPromptLibrary)
+  const prompts = usePrompts()
 
   return (
     <Section title="New chats" description="Used when you start a new chat. Each chat can override them.">
@@ -223,6 +226,17 @@ function DefaultsSection() {
           placeholder="You are a helpful assistant…"
           className="min-h-24"
         />
+      </div>
+      <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+        <div className="min-w-0 text-sm">
+          <div className="font-medium">Prompt library</div>
+          <div className="text-muted-foreground">
+            {prompts?.length ? `${prompts.length} saved` : 'Save prompts you reuse'} · type / to insert one
+          </div>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => openPromptLibrary()}>
+          Manage
+        </Button>
       </div>
     </Section>
   )
@@ -396,7 +410,8 @@ function DataSection() {
     try {
       const result = await importData(JSON.parse(await file.text()))
       const projects = result.projects ? `${result.projects} projects, ` : ''
-      toast.success(`Imported ${projects}${result.conversations} chats and ${result.messages} messages`)
+      const prompts = result.prompts ? `, ${result.prompts} prompts` : ''
+      toast.success(`Imported ${projects}${result.conversations} chats and ${result.messages} messages${prompts}`)
     } catch (err) {
       toast.error(err instanceof SyntaxError ? 'That file is not valid JSON.' : (err as Error).message)
     }
@@ -449,7 +464,8 @@ function DataSection() {
             <AlertDialogHeader>
               <AlertDialogTitle>Delete all chats?</AlertDialogTitle>
               <AlertDialogDescription>
-                Every chat in this browser will be permanently deleted. Export first if you want a backup.
+                Every chat, project and saved prompt in this browser will be permanently deleted. Export first if you
+                want a backup.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

@@ -255,3 +255,19 @@
     break-inside: avoid;
   }
 }
+
+/* A message opened from search flashes once. */
+.search-hit {
+  animation: search-hit 2.4s ease-out;
+}
+@keyframes search-hit {
+  0%,
+  40% {
+    background-color: oklch(87.9% 0.169 91.605 / 0.35);
+    box-shadow: 0 0 0 8px oklch(87.9% 0.169 91.605 / 0.35);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 8px transparent;
+  }
+}

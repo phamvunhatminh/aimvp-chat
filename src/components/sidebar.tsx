@@ -11,7 +11,7 @@ import {
   SquarePenIcon,
   TrashIcon,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, NavLink, useNavigate, useParams } from 'react-router'
 import { Logo } from '@/components/logo'
 import { NameDialog } from '@/components/name-dialog'
@@ -28,10 +28,11 @@ import {
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
-import { useConversations, useProjects } from '@/hooks/use-data'
+import { useChatSearch, useConversations, useProjects } from '@/hooks/use-data'
 import { stopStreaming } from '@/lib/chat'
 import type { Conversation, Project } from '@/lib/db'
 import { createProject, deleteConversation, groupByDate, updateConversation } from '@/lib/repo'
+import type { TextMatch } from '@/lib/search'
 import { cn } from '@/lib/utils'
 import { useIsStreaming } from '@/stores/streams'
 import { useUI } from '@/stores/ui'
@@ -52,12 +53,9 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const navigate = useNavigate()
   const activeProjectId = conversations?.find((c) => c.id === activeId)?.projectId ?? null
 
-  // Chats filed in a project live on the project's page; a search covers every chat.
-  const groups = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const list = conversations ?? []
-    return groupByDate(q ? list.filter((c) => c.title.toLowerCase().includes(q)) : list.filter((c) => !c.projectId))
-  }, [conversations, query])
+  const searching = query.trim() !== ''
+  // Chats filed in a project live on the project's page.
+  const groups = useMemo(() => groupByDate((conversations ?? []).filter((c) => !c.projectId)), [conversations])
 
   return (
     <div className="flex h-full flex-col pt-[env(safe-area-inset-top)]">
@@ -85,7 +83,8 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-2" aria-label="Chat history">
-        {!query && (
+        {searching && <SearchResults query={query} onNavigate={onNavigate} />}
+        {!searching && (
           <section aria-label="Projects">
             <div className="flex items-center justify-between pt-2 pr-0.5 pb-1 pl-2">
               <h3 className="text-xs font-medium text-muted-foreground">Projects</h3>
@@ -118,25 +117,22 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           </section>
         )}
 
-        {conversations && groups.length === 0 && (
+        {!searching && conversations && groups.length === 0 && (
           <p className="px-2 py-6 text-center text-sm text-muted-foreground">
-            {query
-              ? 'No chats match your search.'
-              : projects?.length
-                ? 'Chats outside projects appear here.'
-                : 'Your chats will appear here.'}
+            {projects?.length ? 'Chats outside projects appear here.' : 'Your chats will appear here.'}
           </p>
         )}
-        {groups.map((group) => (
-          <section key={group.label}>
-            <h3 className="px-2 pt-4 pb-1 text-xs font-medium text-muted-foreground">{group.label}</h3>
-            <ul>
-              {group.items.map((c) => (
-                <ConversationItem key={c.id} conversation={c} projects={projects ?? []} onNavigate={onNavigate} />
-              ))}
-            </ul>
-          </section>
-        ))}
+        {!searching &&
+          groups.map((group) => (
+            <section key={group.label}>
+              <h3 className="px-2 pt-4 pb-1 text-xs font-medium text-muted-foreground">{group.label}</h3>
+              <ul>
+                {group.items.map((c) => (
+                  <ConversationItem key={c.id} conversation={c} projects={projects ?? []} onNavigate={onNavigate} />
+                ))}
+              </ul>
+            </section>
+          ))}
       </nav>
 
       <div className="shrink-0 border-t p-2 pb-[max(env(safe-area-inset-bottom),0.5rem)]">
@@ -167,6 +163,63 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         }}
       />
     </div>
+  )
+}
+
+/** `value`, once it has stopped changing for `ms`. */
+function useDebounced<T>(value: T, ms: number): T {
+  const [debounced, setDebounced] = useState(value)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), ms)
+    return () => clearTimeout(timer)
+  }, [value, ms])
+  return debounced
+}
+
+/** Chats whose title or messages match, with the matching text. */
+function SearchResults({ query, onNavigate }: { query: string; onNavigate?: () => void }) {
+  const debounced = useDebounced(query.trim(), 150)
+  const results = useChatSearch(debounced)
+  if (!results || !debounced) return null
+  if (results.length === 0) {
+    return <p className="px-2 py-6 text-center text-sm text-muted-foreground">No chats match your search.</p>
+  }
+  return (
+    <section aria-label="Search results">
+      <ul className="pt-1">
+        {results.map(({ conversation, title, message }) => (
+          <li key={conversation.id}>
+            <NavLink
+              to={`/c/${conversation.id}${message ? `?m=${message.id}` : ''}`}
+              onClick={onNavigate}
+              className={({ isActive }) =>
+                cn('grid gap-0.5 rounded-md px-2 py-1.5 text-sm hover:bg-accent', isActive && 'bg-accent')
+              }
+            >
+              <span className="truncate font-medium">{title ? <Highlight match={title} /> : conversation.title}</span>
+              {message && !(title && sameText(message.match, conversation.title)) && (
+                <span className="line-clamp-2 text-xs break-words text-muted-foreground">
+                  <Highlight match={message.match} />
+                </span>
+              )}
+            </NavLink>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+/** A chat titled after its first message would otherwise show the same text twice. */
+const sameText = (m: TextMatch, text: string) => `${m.before}${m.match}${m.after}` === text
+
+function Highlight({ match }: { match: TextMatch }) {
+  return (
+    <>
+      {match.before}
+      <mark className="rounded-sm bg-amber-200/80 text-foreground dark:bg-amber-400/30">{match.match}</mark>
+      {match.after}
+    </>
   )
 }
 

@@ -14,10 +14,11 @@ const TEXT_EXTENSIONS = new Set(
   ).split(' '),
 )
 
+/** Documents: everything but images. */
+export const DOCUMENT_ACCEPT = ['.pdf', '.docx', '.xlsx'].concat([...TEXT_EXTENSIONS].map((ext) => `.${ext}`)).join(',')
+
 /** Everything the attach button accepts. */
-export const ACCEPT = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', '.pdf', '.docx', '.xlsx']
-  .concat([...TEXT_EXTENSIONS].map((ext) => `.${ext}`))
-  .join(',')
+export const ACCEPT = `image/png,image/jpeg,image/webp,image/gif,${DOCUMENT_ACCEPT}`
 
 export type FileKind = 'image' | 'pdf' | 'docx' | 'xlsx' | 'text'
 
@@ -59,6 +60,19 @@ export function formatBytes(bytes: number): string {
 }
 
 /** A file ready to attach: its metadata, plus the bytes to store for images and PDFs. */
+/** "PDF · 1.2 MB" */
+export function describeFile(a: Pick<Attachment, 'mimeType' | 'size'>): string {
+  const type =
+    a.mimeType === 'application/pdf'
+      ? 'PDF'
+      : a.mimeType.includes('word')
+        ? 'Word'
+        : a.mimeType.includes('sheet')
+          ? 'Excel'
+          : 'Text'
+  return `${type} · ${formatBytes(a.size)}`
+}
+
 export interface PreparedFile {
   attachment: Omit<Attachment, 'blobId'>
   data: ArrayBuffer | null

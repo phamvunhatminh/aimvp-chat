@@ -1,4 +1,5 @@
 import { Outlet } from 'react-router'
+import { PromptLibraryDialog } from '@/components/prompt-library-dialog'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { Sidebar } from '@/components/sidebar'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
@@ -23,6 +24,7 @@ export function AppLayout() {
         <Outlet />
       </main>
       <SettingsDialog />
+      <PromptLibraryDialog />
     </div>
   )
 }

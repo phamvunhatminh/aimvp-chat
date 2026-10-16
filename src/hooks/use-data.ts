@@ -1,5 +1,13 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { getConversation, getMessages, getProject, listConversations, listProjects } from '@/lib/repo'
+import {
+  getConversation,
+  getMessages,
+  getProject,
+  listConversations,
+  listProjects,
+  listPrompts,
+  searchChats,
+} from '@/lib/repo'
 
 export function useConversations() {
   return useLiveQuery(listConversations, [])
@@ -21,4 +29,13 @@ export function useProjects() {
 /** `undefined` while loading, `null` when the project does not exist. */
 export function useProject(id: string | null | undefined) {
   return useLiveQuery(async () => (id ? ((await getProject(id)) ?? null) : null), [id])
+}
+
+export function usePrompts() {
+  return useLiveQuery(listPrompts, [])
+}
+
+/** Chats matching a search, kept current as chats change. */
+export function useChatSearch(query: string) {
+  return useLiveQuery(() => searchChats(query), [query])
 }

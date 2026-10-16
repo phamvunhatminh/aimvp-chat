@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatCost, formatPricing } from './format'
+import { formatCost, formatPricing, formatTokens } from './format'
 
 describe('formatPricing', () => {
   it('formats per-million prices', () => {
@@ -19,5 +19,14 @@ describe('formatCost', () => {
     expect(formatCost(0)).toBe('$0')
     expect(formatCost(0.00042)).toBe('$0.0004')
     expect(formatCost(1.234)).toBe('$1.23')
+  })
+})
+
+describe('formatTokens', () => {
+  it('abbreviates thousands and millions', () => {
+    expect(formatTokens(950)).toBe('950')
+    expect(formatTokens(1234)).toBe('1.2k')
+    expect(formatTokens(34_400)).toBe('34k')
+    expect(formatTokens(1_500_000)).toBe('1.5M')
   })
 })
