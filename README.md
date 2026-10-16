@@ -1,6 +1,6 @@
 # aimvp-chat
 
-A fast, mobile-friendly AI chat app for [aimvp.app](https://aimvp.app). Chat with hundreds of models using
+A fast, mobile-friendly AI chat app at [chat.aimvp.app](https://chat.aimvp.app). Chat with hundreds of models using
 **your own API keys** for [OpenRouter](https://openrouter.ai), OpenAI, Anthropic and Google Gemini. Your keys and
 your chats never touch an aimvp server.
 
@@ -74,7 +74,9 @@ First run of the e2e tests on a new machine: `npx playwright install chromium`.
 
 ## Deploying to Cloudflare
 
-1. Add the `aimvp.app` domain to your Cloudflare account. `wrangler.jsonc` attaches it as a custom domain.
+1. Add the `aimvp.app` zone to your Cloudflare account. `wrangler.jsonc` attaches `chat.aimvp.app` as the
+   Worker's custom domain. Each deploy replaces the Worker's custom domains with that list, so change domains
+   there rather than in the dashboard.
 2. Pick one:
    - **Git integration (recommended):** Cloudflare dashboard → Workers & Pages → Create → Import a repository →
      select this repo. Build command `npm run build`, deploy command `npx wrangler deploy`. Every push to `main`
