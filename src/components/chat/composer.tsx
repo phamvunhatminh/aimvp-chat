@@ -7,10 +7,12 @@ export function Composer({
   onSend,
   onStop,
   streaming,
+  placeholder = 'Message aimvp…',
 }: {
   onSend: (text: string) => void
   onStop: () => void
   streaming: boolean
+  placeholder?: string
 }) {
   const [text, setText] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -51,7 +53,7 @@ export function Composer({
             }
           }}
           autoFocus={!isTouchDevice()}
-          placeholder="Message aimvp…"
+          placeholder={placeholder}
           aria-label="Message"
           className="max-h-52 min-h-10 flex-1 resize-none bg-transparent px-3 py-2 text-base outline-none placeholder:text-muted-foreground"
         />

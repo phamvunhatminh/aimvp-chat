@@ -205,3 +205,94 @@ test.describe('mobile', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   })
 })
+
+test.describe('projects', () => {
+  const openSidebar = async (page: import('@playwright/test').Page) => {
+    if (test.info().project.name === 'mobile') await page.getByRole('button', { name: 'Open sidebar' }).click()
+    return page.getByRole('navigation', { name: 'Chat history' })
+  }
+
+  test('create a project and chat inside it with its instructions', async ({ page, openrouter }) => {
+    await openWithKey(page)
+    await openSidebar(page)
+    await page.getByRole('button', { name: 'New project' }).first().click()
+    await page.getByLabel('Project name').fill('Launch plan')
+    await page.getByRole('button', { name: 'Create' }).click()
+
+    await expect(page).toHaveURL(/\/p\/[\w-]+$/)
+    await expect(page.getByRole('heading', { name: 'Launch plan' })).toBeVisible()
+    await page.getByRole('button', { name: 'Add', exact: true }).click()
+    await page.getByRole('textbox', { name: 'Project instructions' }).fill('We are launching aimvp.')
+    await page.getByRole('button', { name: 'Save' }).click()
+    await expect(page.getByText('We are launching aimvp.')).toBeVisible()
+
+    await composer(page).fill('Draft a tweet')
+    await page.getByRole('button', { name: 'Send message' }).click()
+    await expect(page).toHaveURL(/\/c\/[\w-]+$/)
+    await expect(page.locator('.markdown pre')).toBeVisible()
+    expect((openrouter.chatRequests[0].messages as unknown[])[0]).toEqual({
+      role: 'system',
+      content: 'We are launching aimvp.',
+    })
+
+    // Filed under the project, not in the main chat list.
+    const sidebar = await openSidebar(page)
+    await expect(sidebar.getByRole('link', { name: 'Draft a tweet' })).toHaveCount(0)
+    await expect(sidebar.getByRole('link', { name: 'Launch plan' })).toBeVisible()
+    if (test.info().project.name === 'mobile') await page.keyboard.press('Escape')
+
+    await page.getByTitle('Project: Launch plan').click()
+    await expect(
+      page.getByRole('region', { name: 'Chats in this project' }).getByRole('link', { name: 'Draft a tweet' }),
+    ).toBeVisible()
+  })
+
+  test('move a chat into a new project and back out', async ({ page }) => {
+    await openWithKey(page)
+    await composer(page).fill('Loose chat')
+    await page.getByRole('button', { name: 'Send message' }).click()
+    await expect(page.locator('.markdown pre')).toBeVisible()
+
+    const sidebar = await openSidebar(page)
+    await sidebar.getByRole('button', { name: 'Options for Loose chat' }).click()
+    await page.getByRole('menuitem', { name: 'Move to project…' }).click()
+    await page.getByLabel('New project name').fill('Archive')
+    await page.getByRole('button', { name: 'Create', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Move to project' })).toHaveCount(0)
+
+    await expect(sidebar.getByRole('link', { name: 'Loose chat' })).toHaveCount(0)
+    await expect(sidebar.getByRole('link', { name: 'Archive' })).toBeVisible()
+
+    // Moving it out again works from the project page too.
+    await sidebar.getByRole('link', { name: 'Archive' }).click()
+    const projectChats = page.getByRole('region', { name: 'Chats in this project' })
+    await projectChats.getByRole('button', { name: 'Options for Loose chat' }).click()
+    await page.getByRole('menuitem', { name: 'Move to project…' }).click()
+    await page.getByRole('button', { name: 'Remove from project' }).click()
+    await expect(projectChats.getByRole('link', { name: 'Loose chat' })).toHaveCount(0)
+    await page.getByRole('main').getByRole('button', { name: 'Options for project Archive' }).click()
+    await page.getByRole('menuitem', { name: 'Delete' }).click()
+    await page.getByRole('button', { name: 'Delete', exact: true }).click()
+    await expect(page).toHaveURL('/')
+  })
+
+  test('deleting a project keeps its chats', async ({ page }) => {
+    await openWithKey(page)
+    await composer(page).fill('Keep me')
+    await page.getByRole('button', { name: 'Send message' }).click()
+    await expect(page.locator('.markdown pre')).toBeVisible()
+
+    const sidebar = await openSidebar(page)
+    await sidebar.getByRole('button', { name: 'Options for Keep me' }).click()
+    await page.getByRole('menuitem', { name: 'Move to project…' }).click()
+    await page.getByLabel('New project name').fill('Archive')
+    await page.getByRole('button', { name: 'Create', exact: true }).click()
+    await expect(sidebar.getByRole('link', { name: 'Keep me' })).toHaveCount(0)
+
+    await sidebar.getByRole('button', { name: 'Options for project Archive' }).click()
+    await page.getByRole('menuitem', { name: 'Delete' }).click()
+    await page.getByRole('button', { name: 'Delete', exact: true }).click()
+    await expect(sidebar.getByRole('link', { name: 'Archive' })).toHaveCount(0)
+    await expect(sidebar.getByRole('link', { name: 'Keep me' })).toBeVisible()
+  })
+})

@@ -4,9 +4,10 @@ import { useStreams } from '@/stores/streams'
 import { contentChunk, dataEvent, jsonResponse, sseResponse } from '@/test/sse-response'
 import { buildPrompt, editAndResend, regenerate, sendMessage, stopStreaming } from './chat'
 import { db, type Message } from './db'
-import { createConversation, getConversation, getMessages } from './repo'
+import { createConversation, createProject, getConversation, getMessages } from './repo'
 
 beforeEach(async () => {
+  await db.projects.clear()
   await db.conversations.clear()
   await db.messages.clear()
   useSettings.setState({ apiKeys: { openrouter: 'sk-test' } })
@@ -139,6 +140,20 @@ describe('sendMessage', () => {
   })
 })
 
+describe('projects', () => {
+  it("sends the project's instructions before the chat's system prompt", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(reply('ok'))
+    vi.stubGlobal('fetch', fetchMock)
+    const project = await createProject({ name: 'Work', instructions: 'You help with work.' })
+    const c = await createConversation({ model: 'm/x', systemPrompt: 'Be brief.', projectId: project.id })
+    await sendMessage(c.id, 'hi')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).messages).toEqual([
+      { role: 'system', content: 'You help with work.\n\nBe brief.' },
+      { role: 'user', content: 'hi' },
+    ])
+  })
+})
+
 describe('regenerate and edit', () => {
   it('regenerate replaces the last reply', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(reply('first')).mockResolvedValueOnce(reply('second')))
@@ -176,7 +191,7 @@ describe('buildPrompt', () => {
     const m = (role: Message['role'], content: string, status: Message['status'] = 'done') =>
       ({ role, content, status }) as Message
     expect(
-      buildPrompt('  ', [m('user', 'a'), m('assistant', 'oops', 'error'), m('assistant', ''), m('assistant', 'b')]),
+      buildPrompt(['  ', ''], [m('user', 'a'), m('assistant', 'oops', 'error'), m('assistant', ''), m('assistant', 'b')]),
     ).toEqual([
       { role: 'user', content: 'a' },
       { role: 'assistant', content: 'b' },

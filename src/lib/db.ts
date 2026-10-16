@@ -6,8 +6,20 @@ import { normalizeModelRef, type Usage } from './providers'
  * tombstone so the data can later sync to a server (e.g. Cloudflare D1)
  * with a last-write-wins merge, without a schema rewrite.
  */
+export interface Project {
+  id: string
+  name: string
+  /** Sent with every chat in the project, ahead of the chat's own system prompt. */
+  instructions: string
+  createdAt: number
+  updatedAt: number
+  deletedAt: number | null
+}
+
 export interface Conversation {
   id: string
+  /** The project this chat is filed under, if any. */
+  projectId: string | null
   title: string
   /** Model reference, `provider:model-id`. */
   model: string
@@ -36,6 +48,7 @@ export interface Message {
 }
 
 export class ChatDB extends Dexie {
+  projects!: EntityTable<Project, 'id'>
   conversations!: EntityTable<Conversation, 'id'>
   messages!: EntityTable<Message, 'id'>
 
@@ -60,6 +73,17 @@ export class ChatDB extends Dexie {
           if (m.model) m.model = normalizeModelRef(m.model)
         })
     })
+    // v3: projects group chats and share instructions.
+    this.version(3)
+      .stores({ projects: 'id, updatedAt', conversations: 'id, updatedAt, projectId' })
+      .upgrade(async (tx) => {
+        await tx
+          .table<Conversation>('conversations')
+          .toCollection()
+          .modify((c) => {
+            c.projectId ??= null
+          })
+      })
   }
 }
 

@@ -1,7 +1,9 @@
-import { MenuIcon, SquarePenIcon } from 'lucide-react'
+import { FolderIcon, MenuIcon, SquarePenIcon } from 'lucide-react'
 import { Link } from 'react-router'
 import { ModelPicker } from '@/components/model-picker'
 import { Button } from '@/components/ui/button'
+import type { Project } from '@/lib/db'
+import { cn } from '@/lib/utils'
 import { useUI } from '@/stores/ui'
 import { SystemPromptDialog } from './system-prompt-dialog'
 
@@ -10,11 +12,14 @@ export function ChatHeader({
   onModelChange,
   systemPrompt,
   onSystemPromptChange,
+  project,
 }: {
   model: string
   onModelChange: (model: string) => void
   systemPrompt: string
   onSystemPromptChange: (prompt: string) => void
+  /** The project this chat belongs to (or will be created in). */
+  project?: Project | null
 }) {
   const setSidebarOpen = useUI((s) => s.setSidebarOpen)
 
@@ -29,11 +34,25 @@ export function ChatHeader({
       >
         <MenuIcon />
       </Button>
-      <ModelPicker value={model} onChange={onModelChange} className="max-w-[min(60vw,24rem)]" />
-      <div className="ml-auto flex items-center gap-1">
+      <ModelPicker
+        value={model}
+        onChange={onModelChange}
+        className={cn(project ? 'max-w-[min(42vw,24rem)]' : 'max-w-[min(60vw,24rem)]')}
+      />
+      <div className="ml-auto flex min-w-0 items-center gap-1">
+        {project && (
+          <Link
+            to={`/p/${project.id}`}
+            className="flex h-8 min-w-0 items-center gap-1.5 rounded-md px-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+            title={`Project: ${project.name}`}
+          >
+            <FolderIcon className="size-4 shrink-0" />
+            <span className="max-w-24 truncate sm:max-w-48">{project.name}</span>
+          </Link>
+        )}
         <SystemPromptDialog value={systemPrompt} onSave={onSystemPromptChange} />
         <Button variant="ghost" size="icon" className="md:hidden" asChild>
-          <Link to="/" aria-label="New chat">
+          <Link to={project ? `/p/${project.id}` : '/'} aria-label="New chat">
             <SquarePenIcon />
           </Link>
         </Button>

@@ -5,8 +5,9 @@ import { Composer } from '@/components/chat/composer'
 import { MessageList } from '@/components/chat/message-list'
 import { ConnectCard } from '@/components/connect-card'
 import { Logo } from '@/components/logo'
+import { ProjectOverview } from '@/components/project-overview'
 import { Button } from '@/components/ui/button'
-import { useConversation, useMessages } from '@/hooks/use-data'
+import { useConversation, useMessages, useProject } from '@/hooks/use-data'
 import { sendMessage, stopStreaming } from '@/lib/chat'
 import { parseModelRef, PROVIDERS } from '@/lib/providers'
 import { createConversation, updateConversation } from '@/lib/repo'
@@ -15,15 +16,19 @@ import { connectedProviders, useSettings } from '@/stores/settings'
 import { useIsStreaming } from '@/stores/streams'
 import { useUI } from '@/stores/ui'
 
-/** Remount per conversation so per-chat state (composer text, scroll) starts fresh. */
+/**
+ * `/` and `/p/:projectId` start a new chat (in that project); `/c/:id` opens one.
+ * Remount per route so per-chat state (composer text, scroll) starts fresh.
+ */
 export function ChatRoute() {
-  const { id } = useParams()
-  return <ChatPage key={id ?? 'new'} id={id} />
+  const { id, projectId } = useParams()
+  return <ChatPage key={id ?? `new:${projectId ?? ''}`} id={id} newChatProjectId={projectId} />
 }
 
-function ChatPage({ id }: { id: string | undefined }) {
+function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatProjectId: string | undefined }) {
   const conversation = useConversation(id)
   const messages = useMessages(id)
+  const project = useProject(conversation?.projectId ?? newChatProjectId)
   const apiKeys = useSettings((s) => s.apiKeys)
   const defaultModel = useSettings((s) => s.defaultModel)
   const defaultSystemPrompt = useSettings((s) => s.defaultSystemPrompt)
@@ -34,12 +39,15 @@ function ChatPage({ id }: { id: string | undefined }) {
   const navigate = useNavigate()
 
   useEffect(() => {
-    document.title = conversation ? `${conversation.title} · aimvp` : 'aimvp'
-  }, [conversation])
+    const name = conversation?.title ?? (newChatProjectId ? project?.name : undefined)
+    document.title = name ? `${name} · aimvp` : 'aimvp'
+  }, [conversation, project, newChatProjectId])
 
-  if (id && conversation === null) return <NotFound />
-  // Avoid flashing the empty state while an existing chat loads.
+  if (id && conversation === null) return <NotFound what="Chat" />
+  if (newChatProjectId && project === null) return <NotFound what="Project" />
+  // Avoid flashing the empty state while an existing chat or project loads.
   if (id && (conversation === undefined || messages === undefined)) return null
+  if (newChatProjectId && project === undefined) return null
 
   const model = conversation?.model ?? draft.model ?? defaultModel
   const systemPrompt = conversation?.systemPrompt ?? draft.systemPrompt ?? defaultSystemPrompt
@@ -52,7 +60,7 @@ function ChatPage({ id }: { id: string | undefined }) {
       void sendMessage(conversation.id, text)
       return
     }
-    const created = await createConversation({ model, systemPrompt })
+    const created = await createConversation({ model, systemPrompt, projectId: newChatProjectId ?? null })
     resetDraft()
     navigate(`/c/${created.id}`)
     void sendMessage(created.id, text)
@@ -71,10 +79,16 @@ function ChatPage({ id }: { id: string | undefined }) {
             ? void updateConversation(conversation.id, { systemPrompt: next })
             : setDraft({ systemPrompt: next })
         }
+        // The project page already shows its name, so the header link is for chats in it.
+        project={newChatProjectId ? null : project}
       />
 
       {hasMessages ? (
         <MessageList messages={messages} busy={streaming} />
+      ) : project && newChatProjectId ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <ProjectOverview project={project} />
+        </div>
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto py-8">
           {hasAnyKey ? <EmptyChat /> : <ConnectCard />}
@@ -83,9 +97,14 @@ function ChatPage({ id }: { id: string | undefined }) {
 
       {needsKey && <MissingKeyNotice modelRef={model} />}
       {hasAnyKey ? (
-        <Composer onSend={(text) => void handleSend(text)} onStop={() => id && stopStreaming(id)} streaming={streaming} />
+        <Composer
+          onSend={(text) => void handleSend(text)}
+          onStop={() => id && stopStreaming(id)}
+          streaming={streaming}
+          placeholder={project && newChatProjectId ? `New chat in ${project.name}…` : undefined}
+        />
       ) : (
-        hasMessages && <ReconnectBar />
+        (hasMessages || newChatProjectId) && <ReconnectBar />
       )}
     </>
   )
@@ -129,10 +148,10 @@ function ReconnectBar() {
   )
 }
 
-function NotFound() {
+function NotFound({ what }: { what: 'Chat' | 'Project' }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
-      <h1 className="text-xl font-semibold">Chat not found</h1>
+      <h1 className="text-xl font-semibold">{what} not found</h1>
       <p className="text-muted-foreground">It may have been deleted, or it lives in another browser.</p>
       <Button asChild>
         <Link to="/">Start a new chat</Link>

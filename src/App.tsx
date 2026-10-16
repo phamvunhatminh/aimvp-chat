@@ -19,6 +19,7 @@ export default function App() {
         <Route element={<AppLayout />}>
           <Route index element={<ChatRoute />} />
           <Route path="c/:id" element={<ChatRoute />} />
+          <Route path="p/:projectId" element={<ChatRoute />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -271,7 +271,8 @@ function DataSection() {
   async function handleImport(file: File) {
     try {
       const result = await importData(JSON.parse(await file.text()))
-      toast.success(`Imported ${result.conversations} chats and ${result.messages} messages`)
+      const projects = result.projects ? `${result.projects} projects, ` : ''
+      toast.success(`Imported ${projects}${result.conversations} chats and ${result.messages} messages`)
     } catch (err) {
       toast.error(err instanceof SyntaxError ? 'That file is not valid JSON.' : (err as Error).message)
     }

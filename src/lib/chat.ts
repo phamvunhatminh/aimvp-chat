@@ -18,6 +18,7 @@ import {
   deriveTitle,
   getConversation,
   getMessages,
+  getProject,
   NEW_CHAT_TITLE,
   updateConversation,
   updateMessage,
@@ -26,9 +27,11 @@ import {
 const UI_FLUSH_MS = 50
 const PERSIST_MS = 1000
 
-export function buildPrompt(systemPrompt: string, history: Message[]): ChatMessage[] {
+/** Project instructions first, then the chat's own system prompt; blank parts are dropped. */
+export function buildPrompt(systemPrompts: string[], history: Message[]): ChatMessage[] {
   const messages: ChatMessage[] = []
-  if (systemPrompt.trim()) messages.push({ role: 'system', content: systemPrompt })
+  const system = systemPrompts.filter((p) => p.trim()).join('\n\n')
+  if (system) messages.push({ role: 'system', content: system })
   for (const m of history) {
     // Failed or empty replies are shown to the user but never sent back to the model.
     if (m.role === 'assistant' && (m.status !== 'done' || !m.content)) continue
@@ -96,6 +99,7 @@ async function runCompletion(conversationId: string): Promise<void> {
   const conversation = await getConversation(conversationId)
   if (!conversation || isStreaming(conversationId)) return
   const history = await getMessages(conversationId)
+  const project = conversation.projectId ? await getProject(conversation.projectId) : undefined
   const { provider, model } = parseModelRef(conversation.model)
   const providerName = PROVIDERS[provider].name
   const apiKey = useSettings.getState().apiKeys[provider]
@@ -132,7 +136,7 @@ async function runCompletion(conversationId: string): Promise<void> {
       apiKey,
       model,
       modelInfo: findModel(provider, model),
-      messages: buildPrompt(conversation.systemPrompt, history),
+      messages: buildPrompt([project?.instructions ?? '', conversation.systemPrompt], history),
       signal: controller.signal,
     })
     for await (const event of stream) {

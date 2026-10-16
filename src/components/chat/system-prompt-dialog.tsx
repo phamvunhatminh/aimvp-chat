@@ -1,5 +1,5 @@
 import { ScrollTextIcon } from 'lucide-react'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -13,7 +13,20 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 
-export function SystemPromptDialog({ value, onSave }: { value: string; onSave: (prompt: string) => void }) {
+/** Edits a block of instructions: a chat's system prompt or a project's instructions. */
+export function PromptDialog({
+  value,
+  onSave,
+  title,
+  description,
+  trigger,
+}: {
+  value: string
+  onSave: (prompt: string) => void
+  title: string
+  description: string
+  trigger: ReactNode
+}) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState(value)
 
@@ -25,21 +38,11 @@ export function SystemPromptDialog({ value, onSave }: { value: string; onSave: (
         setOpen(next)
       }}
     >
-      <DialogTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="System prompt"
-          title="System prompt"
-          className={cn(value.trim() && 'text-foreground', !value.trim() && 'text-muted-foreground')}
-        >
-          <ScrollTextIcon />
-        </Button>
-      </DialogTrigger>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>System prompt</DialogTitle>
-          <DialogDescription>Instructions the model follows for this whole chat.</DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <Textarea
           value={draft}
@@ -47,6 +50,7 @@ export function SystemPromptDialog({ value, onSave }: { value: string; onSave: (
           placeholder="You are a helpful assistant…"
           className="min-h-40"
           autoFocus
+          aria-label={title}
         />
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>
@@ -63,5 +67,27 @@ export function SystemPromptDialog({ value, onSave }: { value: string; onSave: (
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+export function SystemPromptDialog({ value, onSave }: { value: string; onSave: (prompt: string) => void }) {
+  return (
+    <PromptDialog
+      value={value}
+      onSave={onSave}
+      title="System prompt"
+      description="Instructions the model follows for this whole chat."
+      trigger={
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="System prompt"
+          title="System prompt"
+          className={cn(value.trim() ? 'text-foreground' : 'text-muted-foreground')}
+        >
+          <ScrollTextIcon />
+        </Button>
+      }
+    />
   )
 }

@@ -11,7 +11,8 @@ your chats never touch an aimvp server.
 - Model picker grouped by provider, with search, OpenRouter pricing and favorites
 - Streaming replies with stop, regenerate, edit-and-resend, and "thinking" output for reasoning models
 - Markdown, tables and syntax-highlighted code with copy buttons
-- Chat history stored in the browser (IndexedDB), with search, rename, delete, and JSON export/import
+- Chat history and projects stored in the browser (IndexedDB), with search, rename, delete, and JSON export/import
+- Projects: folders for chats with shared instructions, created in one step from the sidebar; move chats in and out
 - System prompt per chat, plus a default for new chats
 - "Connect OpenRouter" sign-in (OAuth PKCE), or paste any provider's key
 - Light/dark theme, installable PWA, works well on phones
