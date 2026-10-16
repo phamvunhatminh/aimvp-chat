@@ -1,5 +1,5 @@
 import Dexie from 'dexie'
-import { db, type Conversation, type Message } from './db'
+import { db, type Conversation, type Message, type Project } from './db'
 import { normalizeModelRef } from './providers'
 import { newId } from './utils'
 
@@ -23,16 +23,62 @@ export function deriveTitle(text: string): string {
   return clean.length > 60 ? `${clean.slice(0, 57).trimEnd()}…` : clean
 }
 
+// --- Projects --------------------------------------------------------------
+
+export async function createProject(init: { name: string; instructions?: string }): Promise<Project> {
+  const t = now()
+  const project: Project = {
+    id: newId(),
+    name: init.name.trim(),
+    instructions: init.instructions ?? '',
+    createdAt: t,
+    updatedAt: t,
+    deletedAt: null,
+  }
+  await db.projects.add(project)
+  return project
+}
+
+export async function getProject(id: string): Promise<Project | undefined> {
+  const project = await db.projects.get(id)
+  return project && !project.deletedAt ? project : undefined
+}
+
+/** Projects in name order, like folders. */
+export async function listProjects(): Promise<Project[]> {
+  const projects = await db.projects.filter((p) => !p.deletedAt).toArray()
+  return projects.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+}
+
+export async function updateProject(id: string, patch: Partial<Pick<Project, 'name' | 'instructions'>>): Promise<void> {
+  await db.projects
+    .where('id')
+    .equals(id)
+    .filter((p) => !p.deletedAt)
+    .modify({ ...patch, updatedAt: now() })
+}
+
+/** Tombstones the project; its chats are kept and move back to the main chat list. */
+export async function deleteProject(id: string): Promise<void> {
+  await db.transaction('rw', db.projects, db.conversations, async () => {
+    const t = now()
+    await db.projects.update(id, { name: '', instructions: '', updatedAt: t, deletedAt: t })
+    await db.conversations.where('projectId').equals(id).modify({ projectId: null, updatedAt: t })
+  })
+}
+
 // --- Conversations ---------------------------------------------------------
 
 export async function createConversation(init: {
   model: string
   systemPrompt: string
+  projectId?: string | null
   title?: string
 }): Promise<Conversation> {
   const t = now()
   const conversation: Conversation = {
     id: newId(),
+    projectId: init.projectId ?? null,
     title: init.title ?? NEW_CHAT_TITLE,
     model: init.model,
     systemPrompt: init.systemPrompt,
@@ -61,7 +107,7 @@ export async function listConversations(): Promise<Conversation[]> {
 
 export async function updateConversation(
   id: string,
-  patch: Partial<Pick<Conversation, 'title' | 'model' | 'systemPrompt'>>,
+  patch: Partial<Pick<Conversation, 'title' | 'model' | 'systemPrompt' | 'projectId'>>,
 ): Promise<void> {
   await db.conversations
     .where('id')
@@ -150,20 +196,37 @@ export interface ExportFile {
   app: 'aimvp'
   version: 1
   exportedAt: number
+  /** Absent in exports made before projects existed. */
+  projects?: Project[]
   conversations: Conversation[]
   messages: Message[]
 }
 
 export async function exportData(): Promise<ExportFile> {
-  const [conversations, messages] = await Promise.all([
+  const [projects, conversations, messages] = await Promise.all([
+    db.projects.filter((p) => !p.deletedAt).toArray(),
     db.conversations.filter((c) => !c.deletedAt).toArray(),
     db.messages.filter((m) => !m.deletedAt).toArray(),
   ])
-  return { app: 'aimvp', version: 1, exportedAt: Date.now(), conversations, messages }
+  return { app: 'aimvp', version: 1, exportedAt: Date.now(), projects, conversations, messages }
 }
 
 const isString = (v: unknown): v is string => typeof v === 'string'
 const isNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+
+function toProject(raw: unknown): Project | null {
+  const r = raw as Record<string, unknown>
+  if (!r || !isString(r.id) || !isString(r.name)) return null
+  if (!isNumber(r.createdAt) || !isNumber(r.updatedAt)) return null
+  return {
+    id: r.id,
+    name: r.name,
+    instructions: isString(r.instructions) ? r.instructions : '',
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+    deletedAt: isNumber(r.deletedAt) ? r.deletedAt : null,
+  }
+}
 
 function toConversation(raw: unknown): Conversation | null {
   const r = raw as Record<string, unknown>
@@ -171,6 +234,7 @@ function toConversation(raw: unknown): Conversation | null {
   if (!isNumber(r.createdAt) || !isNumber(r.updatedAt)) return null
   return {
     id: r.id,
+    projectId: isString(r.projectId) ? r.projectId : null,
     title: r.title,
     model: normalizeModelRef(r.model),
     systemPrompt: isString(r.systemPrompt) ? r.systemPrompt : '',
@@ -203,28 +267,34 @@ function toMessage(raw: unknown): Message | null {
 }
 
 /** Merges an export into the local database; the newer `updatedAt` wins per record. */
-export async function importData(file: unknown): Promise<{ conversations: number; messages: number }> {
+export async function importData(
+  file: unknown,
+): Promise<{ projects: number; conversations: number; messages: number }> {
   const f = file as Partial<ExportFile>
   if (!f || f.app !== 'aimvp' || f.version !== 1 || !Array.isArray(f.conversations) || !Array.isArray(f.messages)) {
     throw new Error('This file is not an aimvp export.')
   }
+  const projects = (Array.isArray(f.projects) ? f.projects : []).map(toProject).filter((p) => p !== null)
   const conversations = f.conversations.map(toConversation).filter((c) => c !== null)
   const messages = f.messages.map(toMessage).filter((m) => m !== null)
 
-  return db.transaction('rw', db.conversations, db.messages, async () => {
+  return db.transaction('rw', db.projects, db.conversations, db.messages, async () => {
     const newer = <T extends { id: string; updatedAt: number }>(incoming: T[], existing: (T | undefined)[]) =>
       incoming.filter((r, i) => !existing[i] || existing[i].updatedAt < r.updatedAt)
 
+    const keptProjects = newer(projects, await db.projects.bulkGet(projects.map((p) => p.id)))
     const keptConversations = newer(conversations, await db.conversations.bulkGet(conversations.map((c) => c.id)))
     const keptMessages = newer(messages, await db.messages.bulkGet(messages.map((m) => m.id)))
+    await db.projects.bulkPut(keptProjects)
     await db.conversations.bulkPut(keptConversations)
     await db.messages.bulkPut(keptMessages)
-    return { conversations: keptConversations.length, messages: keptMessages.length }
+    return { projects: keptProjects.length, conversations: keptConversations.length, messages: keptMessages.length }
   })
 }
 
 export async function deleteAllData(): Promise<void> {
-  await db.transaction('rw', db.conversations, db.messages, async () => {
+  await db.transaction('rw', db.projects, db.conversations, db.messages, async () => {
+    await db.projects.clear()
     await db.conversations.clear()
     await db.messages.clear()
   })

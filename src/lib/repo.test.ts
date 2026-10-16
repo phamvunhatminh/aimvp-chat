@@ -3,6 +3,12 @@ import { db, type Conversation } from './db'
 import {
   addMessage,
   createConversation,
+  createProject,
+  deleteProject,
+  getProject,
+  listProjects,
+  updateConversation,
+  updateProject,
   deleteConversation,
   deleteMessages,
   deriveTitle,
@@ -17,6 +23,7 @@ import {
 } from './repo'
 
 beforeEach(async () => {
+  await db.projects.clear()
   await db.conversations.clear()
   await db.messages.clear()
 })
@@ -74,6 +81,32 @@ describe('messages', () => {
   })
 })
 
+describe('projects', () => {
+  it('lists projects by name and files chats under them', async () => {
+    const b = await createProject({ name: 'beta' })
+    const a = await createProject({ name: 'Alpha', instructions: 'Be formal.' })
+    expect((await listProjects()).map((p) => p.name)).toEqual(['Alpha', 'beta'])
+
+    const chat = await createConversation({ model: 'm', systemPrompt: '', projectId: a.id })
+    expect(chat.projectId).toBe(a.id)
+    await updateConversation(chat.id, { projectId: b.id })
+    expect((await db.conversations.get(chat.id))?.projectId).toBe(b.id)
+
+    await updateProject(a.id, { name: 'Alpha 2', instructions: 'Be brief.' })
+    expect(await getProject(a.id)).toMatchObject({ name: 'Alpha 2', instructions: 'Be brief.' })
+  })
+
+  it('deleting a project keeps its chats and moves them out', async () => {
+    const p = await createProject({ name: 'Temp', instructions: 'secret' })
+    const chat = await createConversation({ model: 'm', systemPrompt: '', projectId: p.id })
+    await deleteProject(p.id)
+    expect(await getProject(p.id)).toBeUndefined()
+    expect(await listProjects()).toEqual([])
+    expect((await db.projects.get(p.id))?.instructions).toBe('')
+    expect((await getConversation(chat.id))?.projectId).toBeNull()
+  })
+})
+
 describe('export / import', () => {
   it('round-trips data and keeps the newer copy of each record', async () => {
     const c = await newChat()
@@ -83,11 +116,27 @@ describe('export / import', () => {
 
     await db.conversations.clear()
     await db.messages.clear()
-    expect(await importData(JSON.parse(JSON.stringify(file)))).toEqual({ conversations: 1, messages: 1 })
+    expect(await importData(JSON.parse(JSON.stringify(file)))).toEqual({ projects: 0, conversations: 1, messages: 1 })
     expect((await getMessages(c.id)).map((m) => m.content)).toEqual(['hello'])
 
     // Re-importing the same (not newer) data changes nothing.
-    expect(await importData(file)).toEqual({ conversations: 0, messages: 0 })
+    expect(await importData(file)).toEqual({ projects: 0, conversations: 0, messages: 0 })
+  })
+
+  it('round-trips projects and accepts exports from before projects existed', async () => {
+    const p = await createProject({ name: 'Work', instructions: 'Be formal.' })
+    const c = await createConversation({ model: 'm', systemPrompt: '', projectId: p.id })
+    const file = JSON.parse(JSON.stringify(await exportData()))
+    await db.projects.clear()
+    await db.conversations.clear()
+
+    expect(await importData(file)).toMatchObject({ projects: 1, conversations: 1 })
+    expect(await getProject(p.id)).toMatchObject({ name: 'Work', instructions: 'Be formal.' })
+    expect((await getConversation(c.id))?.projectId).toBe(p.id)
+
+    const legacy = { ...file, projects: undefined, conversations: [{ ...file.conversations[0], id: 'old', projectId: undefined }] }
+    await importData(legacy)
+    expect((await getConversation('old'))?.projectId).toBeNull()
   })
 
   it('rejects files that are not aimvp exports', async () => {
@@ -102,7 +151,7 @@ describe('export / import', () => {
       conversations: [{ id: 'x' }],
       messages: [{ id: 'y', role: 'system' }],
     })
-    expect(result).toEqual({ conversations: 0, messages: 0 })
+    expect(result).toEqual({ projects: 0, conversations: 0, messages: 0 })
   })
 })
 
