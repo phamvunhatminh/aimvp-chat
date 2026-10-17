@@ -24,7 +24,7 @@ export function conversationToMarkdown(conversation: Conversation, messages: Mes
 
 const EXTENSIONS: Record<string, string> = {
   typescript: 'ts', ts: 'ts', tsx: 'tsx', javascript: 'js', js: 'js', jsx: 'jsx', python: 'py', py: 'py',
-  json: 'json', html: 'html', xml: 'xml', css: 'css', scss: 'scss', bash: 'sh', sh: 'sh', shell: 'sh', zsh: 'sh',
+  json: 'json', html: 'html', xml: 'xml', svg: 'svg', css: 'css', scss: 'scss', bash: 'sh', sh: 'sh', shell: 'sh', zsh: 'sh',
   sql: 'sql', go: 'go', rust: 'rs', rs: 'rs', java: 'java', kotlin: 'kt', swift: 'swift', c: 'c', cpp: 'cpp',
   'c++': 'cpp', csharp: 'cs', cs: 'cs', ruby: 'rb', rb: 'rb', php: 'php', markdown: 'md', md: 'md', yaml: 'yml',
   yml: 'yml', toml: 'toml', dockerfile: 'Dockerfile', diff: 'diff', graphql: 'graphql', lua: 'lua', dart: 'dart',

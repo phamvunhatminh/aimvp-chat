@@ -7,12 +7,13 @@ export interface PromptDraft {
   content: string
 }
 
-export type SettingsTab = 'general' | 'keys' | 'voice' | 'usage' | 'data'
+export type SettingsTab = 'general' | 'account' | 'keys' | 'voice' | 'usage' | 'data'
 
 interface UIState {
   settingsOpen: boolean
   settingsTab: SettingsTab
   sidebarOpen: boolean
+  signInOpen: boolean
   /** Model and system prompt for the "New chat" screen, before a conversation exists. */
   draft: { model: string | null; systemPrompt: string | null; webSearch: boolean }
   /** The prompt library dialog: closed, open on the list, or open on a prompt. */
@@ -25,6 +26,7 @@ interface UIState {
   setPromptEditing: (editing: PromptDraft | null) => void
   closePromptLibrary: () => void
   setSidebarOpen: (open: boolean) => void
+  setSignInOpen: (open: boolean) => void
   setDraft: (draft: Partial<UIState['draft']>) => void
   resetDraft: () => void
 }
@@ -33,6 +35,7 @@ export const useUI = create<UIState>()((set) => ({
   settingsOpen: false,
   settingsTab: 'general',
   sidebarOpen: false,
+  signInOpen: false,
   draft: { model: null, systemPrompt: null, webSearch: false },
   promptLibrary: { open: false, editing: null },
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
@@ -42,6 +45,7 @@ export const useUI = create<UIState>()((set) => ({
   setPromptEditing: (editing) => set((s) => ({ promptLibrary: { ...s.promptLibrary, editing } })),
   closePromptLibrary: () => set({ promptLibrary: { open: false, editing: null } }),
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
+  setSignInOpen: (signInOpen) => set({ signInOpen }),
   setDraft: (draft) => set((s) => ({ draft: { ...s.draft, ...draft } })),
   resetDraft: () => set({ draft: { model: null, systemPrompt: null, webSearch: false } }),
 }))

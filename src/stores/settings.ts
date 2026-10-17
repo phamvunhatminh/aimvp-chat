@@ -61,6 +61,57 @@ type PersistedSettings = Pick<
   | 'pdfMode'
 >
 
+/**
+ * Preferences that follow the user's account to their other devices. API keys never
+ * leave the device, and neither do the default model (it depends on which keys a
+ * device has) and the sidebar's state.
+ */
+export const ACCOUNT_SETTINGS = [
+  'defaultSystemPrompt',
+  'favoriteModels',
+  'theme',
+  'speechInput',
+  'speechOutput',
+  'speechVoice',
+  'speechLanguage',
+  'showUsageInSidebar',
+  'monthlyBudget',
+  'pdfMode',
+] as const satisfies readonly (keyof PersistedSettings)[]
+
+export type AccountSettings = Pick<PersistedSettings, (typeof ACCOUNT_SETTINGS)[number]>
+
+export function pickAccountSettings(state: AccountSettings): AccountSettings {
+  return Object.fromEntries(ACCOUNT_SETTINGS.map((key) => [key, state[key]])) as unknown as AccountSettings
+}
+
+const oneOf =
+  <T extends string>(...values: T[]) =>
+  (v: unknown): v is T =>
+    values.includes(v as T)
+const isString = (v: unknown): v is string => typeof v === 'string'
+
+const ACCOUNT_SETTING_CHECKS: { [K in keyof AccountSettings]: (v: unknown) => v is AccountSettings[K] } = {
+  defaultSystemPrompt: isString,
+  favoriteModels: (v): v is string[] => Array.isArray(v) && v.every(isString),
+  theme: oneOf('system', 'light', 'dark'),
+  speechInput: oneOf('browser', 'openai'),
+  speechOutput: oneOf('browser', 'openai'),
+  speechVoice: isString,
+  speechLanguage: isString,
+  showUsageInSidebar: (v): v is boolean => typeof v === 'boolean',
+  monthlyBudget: (v): v is number | null => v === null || (typeof v === 'number' && Number.isFinite(v) && v > 0),
+  pdfMode: oneOf('file', 'text'),
+}
+
+/** The valid preferences in settings from the account; anything else is left alone. */
+export function parseAccountSettings(raw: unknown): Partial<AccountSettings> {
+  const r = (raw ?? {}) as Record<string, unknown>
+  return Object.fromEntries(
+    ACCOUNT_SETTINGS.filter((key) => ACCOUNT_SETTING_CHECKS[key](r[key])).map((key) => [key, r[key]]),
+  )
+}
+
 /** Providers the user has a key for, in display order. */
 export function connectedProviders(apiKeys: ApiKeys): ProviderId[] {
   return PROVIDER_IDS.filter((p) => !!apiKeys[p])

@@ -1,5 +1,6 @@
 import {
   ChartColumnIcon,
+  CircleUserRoundIcon,
   DatabaseIcon,
   DownloadIcon,
   ExternalLinkIcon,
@@ -17,6 +18,7 @@ import { Tabs } from 'radix-ui'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
+import { AccountSection } from '@/components/account/account-section'
 import { ModelPicker } from '@/components/model-picker'
 import {
   AlertDialog,
@@ -41,15 +43,18 @@ import { loadProvider, PROVIDER_IDS, PROVIDERS, ProviderError, type ProviderId }
 import { fetchKeyInfo, type KeyInfo } from '@/lib/providers/openrouter'
 import { deleteAllData, exportData, importData } from '@/lib/repo'
 import { browserRecognition, canSpeakInBrowser, OPENAI_VOICES, resolveEngine, SPEECH_LANGUAGES } from '@/lib/speech'
+import { accountsEnabled } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import { usePrompts } from '@/hooks/use-data'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import { useAccount } from '@/stores/account'
 import { useSettings, type PdfMode, type SpeechEngine, type Theme } from '@/stores/settings'
 import { useStreams } from '@/stores/streams'
 import { useUI, type SettingsTab } from '@/stores/ui'
 
 const TABS: { value: SettingsTab; label: string; icon: LucideIcon }[] = [
   { value: 'general', label: 'General', icon: SlidersHorizontalIcon },
+  ...(accountsEnabled ? [{ value: 'account' as const, label: 'Account', icon: CircleUserRoundIcon }] : []),
   { value: 'keys', label: 'API keys', icon: KeyRoundIcon },
   { value: 'voice', label: 'Voice', icon: MicIcon },
   { value: 'usage', label: 'Usage', icon: ChartColumnIcon },
@@ -62,13 +67,18 @@ export function SettingsDialog() {
   const tab = useUI((s) => s.settingsTab)
   const setTab = useUI((s) => s.setSettingsTab)
   const wide = useMediaQuery('(min-width: 768px)')
+  const signedIn = useAccount((s) => s.status === 'signed-in')
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="flex h-[min(44rem,calc(100dvh-2rem))] max-w-3xl flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="shrink-0 border-b px-5 py-4 text-left sm:px-6">
           <DialogTitle>Settings</DialogTitle>
-          <DialogDescription>Everything here is saved in this browser only.</DialogDescription>
+          <DialogDescription>
+            {signedIn
+              ? 'Preferences sync with your account; API keys stay in this browser.'
+              : 'Everything here is saved in this browser only.'}
+          </DialogDescription>
         </DialogHeader>
         <Tabs.Root
           value={tab}
@@ -97,6 +107,11 @@ export function SettingsDialog() {
               <FilesSection />
               <AppearanceSection />
             </Tabs.Content>
+            {accountsEnabled && (
+              <Tabs.Content value="account" className="outline-none">
+                <AccountSection />
+              </Tabs.Content>
+            )}
             <Tabs.Content value="keys" className="outline-none">
               <ApiKeysSection />
             </Tabs.Content>
@@ -529,6 +544,7 @@ function DataSection() {
   const fileInput = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
   const [persisted, setPersisted] = useState<boolean | null>(null)
+  const signedIn = useAccount((s) => s.status === 'signed-in')
 
   useEffect(() => {
     navigator.storage?.persisted?.().then(setPersisted, () => {})
@@ -567,9 +583,11 @@ function DataSection() {
     <Section
       title="Your data"
       description={
-        persisted === false
-          ? 'Chats live in this browser. Export a backup now and then; installing this site as an app helps keep them safe.'
-          : 'Chats live in this browser. Export a backup to move them to another device.'
+        signedIn
+          ? 'Chats sync with your account, so they are on every device you sign in on. Export makes a backup file.'
+          : persisted === false
+            ? 'Chats live in this browser. Export a backup now and then; installing this site as an app helps keep them safe.'
+            : 'Chats live in this browser. Export a backup to move them to another device.'
       }
     >
       <div className="flex flex-wrap gap-2">
@@ -603,8 +621,10 @@ function DataSection() {
             <AlertDialogHeader>
               <AlertDialogTitle>Delete all chats?</AlertDialogTitle>
               <AlertDialogDescription>
-                Every chat, project and saved prompt in this browser will be permanently deleted. Export first if you
-                want a backup.
+                {signedIn
+                  ? 'Every chat, project and saved prompt will be permanently deleted, here, in your account and on your other devices.'
+                  : 'Every chat, project and saved prompt in this browser will be permanently deleted.'}{' '}
+                Export first if you want a backup.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

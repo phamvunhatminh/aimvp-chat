@@ -8,12 +8,16 @@ import {
   type Project,
   type SavedPrompt,
   type StoredBlob,
+  type SyncFlag,
 } from './db'
 import { normalizeModelRef, toSource } from './providers'
 import { findMatch, foldText, searchableText, type TextMatch } from './search'
 import { newId } from './utils'
 
 export const NEW_CHAT_TITLE = 'New chat'
+
+/** The `meta` entry naming the account this device's data belongs to. */
+export const OWNER_KEY = 'owner'
 
 let lastTimestamp = 0
 /** Strictly increasing timestamps so messages created in the same millisecond keep their order. */
@@ -155,7 +159,7 @@ const WIPED = { content: '', reasoning: '', attachments: [] as Attachment[], sou
 
 /** Tombstones the conversation and its messages, wiping their content and files. */
 export async function deleteConversation(id: string): Promise<void> {
-  await db.transaction('rw', db.conversations, db.messages, db.blobs, async () => {
+  await db.transaction('rw', [db.conversations, db.messages, db.blobs, db.deletedBlobs], async () => {
     const t = now()
     await db.conversations.update(id, { title: '', systemPrompt: '', updatedAt: t, deletedAt: t })
     await deleteBlobsOf(await messagesOf(id).toArray())
@@ -217,7 +221,7 @@ export async function deleteMessages(
   predicate: (m: Message) => boolean,
 ): Promise<void> {
   const t = now()
-  await db.transaction('rw', db.messages, db.blobs, async () => {
+  await db.transaction('rw', [db.messages, db.blobs, db.deletedBlobs], async () => {
     const matching = messagesOf(conversationId).filter((m) => !m.deletedAt && predicate(m))
     await deleteBlobsOf(await matching.toArray())
     await matching.modify({ ...WIPED, updatedAt: t, deletedAt: t })
@@ -300,13 +304,28 @@ export async function saveBlob(data: ArrayBuffer, mimeType: string): Promise<str
   return id
 }
 
-export function getBlob(id: string): Promise<StoredBlob | undefined> {
-  return db.blobs.get(id)
+let fetchMissingBlob: ((id: string) => Promise<StoredBlob | undefined>) | null = null
+
+/** Where `getBlob` looks for files this device doesn't have: the signed-in account. */
+export function setMissingBlobFetcher(fetcher: typeof fetchMissingBlob): void {
+  fetchMissingBlob = fetcher
 }
 
+/** A stored file, downloaded from the account if this device lacks it; undefined if that fails too. */
+export async function getBlob(id: string): Promise<StoredBlob | undefined> {
+  return (await db.blobs.get(id)) ?? fetchMissingBlob?.(id).catch(() => undefined)
+}
+
+export function blobIdsOf(messages: Message[]): string[] {
+  return messages.flatMap((m) => (m.attachments ?? []).map((a) => a.blobId).filter((id) => id !== null))
+}
+
+/** Deletes the messages' files here, and lists them for deletion from the account. */
 async function deleteBlobsOf(messages: Message[]): Promise<void> {
-  const ids = messages.flatMap((m) => (m.attachments ?? []).map((a) => a.blobId).filter((id) => id !== null))
-  if (ids.length) await db.blobs.bulkDelete(ids)
+  const ids = blobIdsOf(messages)
+  if (!ids.length) return
+  await db.blobs.bulkDelete(ids)
+  await db.deletedBlobs.bulkPut(ids.map((id) => ({ id })))
 }
 
 /** Marks replies left `streaming` by a closed tab as interrupted. */
@@ -341,14 +360,21 @@ export interface ExportFile {
   prompts?: SavedPrompt[]
 }
 
+/** A record without its sync bookkeeping. */
+export function withoutSyncFlag<T extends SyncFlag>(record: T): Omit<T, 'synced'> {
+  const copy = { ...record }
+  delete copy.synced
+  return copy
+}
+
 export async function exportData(): Promise<ExportFile> {
   const [projects, conversations, messages, prompts] = await Promise.all([
     db.projects.filter((p) => !p.deletedAt).toArray(),
     db.conversations.filter((c) => !c.deletedAt).toArray(),
     db.messages.filter((m) => !m.deletedAt).toArray(),
     db.prompts.filter((p) => !p.deletedAt).toArray(),
-  ])
-  const blobIds = messages.flatMap((m) => m.attachments.map((a) => a.blobId).filter((id) => id !== null))
+  ]).then((tables) => tables.map((records) => records.map(withoutSyncFlag)) as typeof tables)
+  const blobIds = blobIdsOf(messages)
   const blobs = (await db.blobs.bulkGet(blobIds))
     .filter((b) => b !== undefined)
     .map((b) => ({ id: b.id, mimeType: b.mimeType, data: bytesToBase64(b.data) }))
@@ -358,7 +384,7 @@ export async function exportData(): Promise<ExportFile> {
 const isString = (v: unknown): v is string => typeof v === 'string'
 const isNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
-function toProject(raw: unknown): Project | null {
+export function toProject(raw: unknown): Project | null {
   const r = raw as Record<string, unknown>
   if (!r || !isString(r.id) || !isString(r.name)) return null
   if (!isNumber(r.createdAt) || !isNumber(r.updatedAt)) return null
@@ -375,7 +401,7 @@ function toProject(raw: unknown): Project | null {
   }
 }
 
-function toConversation(raw: unknown): Conversation | null {
+export function toConversation(raw: unknown): Conversation | null {
   const r = raw as Record<string, unknown>
   if (!r || !isString(r.id) || !isString(r.title) || !isString(r.model)) return null
   if (!isNumber(r.createdAt) || !isNumber(r.updatedAt)) return null
@@ -414,7 +440,7 @@ function toAttachment(raw: unknown): Attachment | null {
   }
 }
 
-function toPrompt(raw: unknown): SavedPrompt | null {
+export function toPrompt(raw: unknown): SavedPrompt | null {
   const r = raw as Record<string, unknown>
   if (!r || !isString(r.id) || !isString(r.title) || !isString(r.content)) return null
   if (!isNumber(r.createdAt) || !isNumber(r.updatedAt)) return null
@@ -428,7 +454,7 @@ function toPrompt(raw: unknown): SavedPrompt | null {
   }
 }
 
-function toMessage(raw: unknown): Message | null {
+export function toMessage(raw: unknown): Message | null {
   const r = raw as Record<string, unknown>
   if (!r || !isString(r.id) || !isString(r.conversationId) || !isString(r.content)) return null
   if (r.role !== 'user' && r.role !== 'assistant') return null
@@ -501,13 +527,26 @@ export async function importData(
   })
 }
 
+/**
+ * Deletes everything. Data linked to an account is tombstoned instead, so the
+ * deletion reaches the account and the user's other devices.
+ */
 export async function deleteAllData(): Promise<void> {
-  await db.transaction('rw', [db.projects, db.conversations, db.messages, db.blobs, db.prompts], async () => {
+  const tables = [db.projects, db.conversations, db.messages, db.blobs, db.prompts, db.deletedBlobs, db.meta]
+  await db.transaction('rw', tables, async () => {
+    if (!(await db.meta.get(OWNER_KEY))) {
+      await Promise.all(tables.map((table) => table.clear()))
+      return
+    }
+    const t = now()
+    const live = <T extends { deletedAt: number | null }>(r: T) => !r.deletedAt
+    await db.projects.filter(live).modify({ name: '', instructions: '', files: [], updatedAt: t, deletedAt: t })
+    await db.conversations.filter(live).modify({ title: '', systemPrompt: '', updatedAt: t, deletedAt: t })
+    await db.messages.filter(live).modify({ ...WIPED, updatedAt: t, deletedAt: t })
+    await db.prompts.filter(live).modify({ title: '', content: '', updatedAt: t, deletedAt: t })
+    const blobIds = await db.blobs.toCollection().primaryKeys()
+    await db.deletedBlobs.bulkPut(blobIds.map((id) => ({ id })))
     await db.blobs.clear()
-    await db.prompts.clear()
-    await db.projects.clear()
-    await db.conversations.clear()
-    await db.messages.clear()
   })
 }
 
