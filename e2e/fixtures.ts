@@ -1,5 +1,6 @@
 import { test as base, expect, type BrowserContext, type Page } from '@playwright/test'
 import { makePng, makeWav } from './files'
+import { FakeSupabase } from './supabase'
 
 export const MODELS = [
   { id: 'openrouter/auto', name: 'Auto Router', pricing: { prompt: '-1', completion: '-1' } },
@@ -171,7 +172,8 @@ async function mockDirectProviders(context: BrowserContext, mock: OpenRouterMock
   })
 }
 
-async function mockOpenRouter(context: BrowserContext): Promise<OpenRouterMock> {
+/** Mocks every AI provider in a browser context. */
+export async function mockOpenRouter(context: BrowserContext): Promise<OpenRouterMock> {
   const mock: OpenRouterMock = { chatRequests: [], keyExchanges: 0, audioRequests: [], directRequests: [] }
   await mockDirectProviders(context, mock)
   const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' }
@@ -232,9 +234,18 @@ async function mockOpenRouter(context: BrowserContext): Promise<OpenRouterMock> 
   return mock
 }
 
-export const test = base.extend<{ openrouter: OpenRouterMock }>({
+export const test = base.extend<{ openrouter: OpenRouterMock; supabase: FakeSupabase }>({
   // Auto: no test may reach the real OpenRouter. (`provide` is Playwright's `use`, renamed for the hooks lint.)
   openrouter: [async ({ context }, provide) => provide(await mockOpenRouter(context)), { auto: true }],
+  // The build's Supabase project, faked, so accounts work and nothing reaches a real one.
+  supabase: [
+    async ({ context }, provide) => {
+      const supabase = new FakeSupabase()
+      await supabase.attach(context)
+      await provide(supabase)
+    },
+    { auto: true },
+  ],
 })
 
 export { expect }

@@ -1,10 +1,9 @@
-import Dexie, { type EntityTable } from 'dexie'
+import Dexie, { type EntityTable, type Transaction } from 'dexie'
 import { normalizeModelRef, type Source, type Usage } from './providers'
 
 /**
  * Every record has a client-generated UUID, `updatedAt` and a `deletedAt`
- * tombstone so the data can later sync to a server (e.g. Cloudflare D1)
- * with a last-write-wins merge, without a schema rewrite.
+ * tombstone, so it syncs with the signed-in account by a last-write-wins merge.
  */
 export interface Project {
   id: string
@@ -91,12 +90,39 @@ export interface Message {
   deletedAt: number | null
 }
 
+/** 0 while the account lacks this version of a record; set by sync, cleared by every local write. */
+export interface SyncFlag {
+  synced?: 0 | 1
+}
+
+/** Sync bookkeeping: the account this data belongs to, how far it has pulled, and so on. */
+export interface MetaEntry {
+  key: string
+  value: unknown
+}
+
+/** Files deleted here that the account may still hold. */
+export interface DeletedBlob {
+  id: string
+}
+
+/** Transactions writing what came from the account, which mustn't be sent back. */
+const accountTransactions = new WeakSet<Transaction>()
+let onLocalChange: (() => void) | null = null
+
+/** Calls `listener` after each local change to synced data (one listener at a time). */
+export function setLocalChangeListener(listener: (() => void) | null): void {
+  onLocalChange = listener
+}
+
 export class ChatDB extends Dexie {
-  projects!: EntityTable<Project, 'id'>
-  conversations!: EntityTable<Conversation, 'id'>
-  messages!: EntityTable<Message, 'id'>
-  blobs!: EntityTable<StoredBlob, 'id'>
-  prompts!: EntityTable<SavedPrompt, 'id'>
+  projects!: EntityTable<Project & SyncFlag, 'id'>
+  conversations!: EntityTable<Conversation & SyncFlag, 'id'>
+  messages!: EntityTable<Message & SyncFlag, 'id'>
+  blobs!: EntityTable<StoredBlob & SyncFlag, 'id'>
+  prompts!: EntityTable<SavedPrompt & SyncFlag, 'id'>
+  meta!: EntityTable<MetaEntry, 'key'>
+  deletedBlobs!: EntityTable<DeletedBlob, 'id'>
 
   constructor(name = 'aimvp') {
     super(name)
@@ -152,6 +178,50 @@ export class ChatDB extends Dexie {
             p.files ??= []
           })
       })
+    // v6: data syncs with the signed-in account; everything so far is yet to be uploaded.
+    this.version(6)
+      .stores({
+        projects: 'id, updatedAt, synced',
+        conversations: 'id, updatedAt, projectId, synced',
+        messages: 'id, [conversationId+createdAt], status, updatedAt, synced',
+        prompts: 'id, updatedAt, synced',
+        blobs: 'id, synced',
+        meta: 'key',
+        deletedBlobs: 'id',
+      })
+      .upgrade(async (tx) => {
+        for (const name of ['projects', 'conversations', 'messages', 'prompts', 'blobs']) {
+          await tx.table(name).toCollection().modify({ synced: 0 })
+        }
+      })
+
+    for (const table of [this.projects, this.conversations, this.messages, this.prompts, this.blobs]) {
+      table.hook('creating', (_key, record, tx) => {
+        if (accountTransactions.has(tx)) return
+        record.synced = 0
+        onLocalChange?.()
+      })
+      table.hook('updating', (changes, _key, record, tx) => {
+        if (accountTransactions.has(tx)) return
+        onLocalChange?.()
+        // An edit must be newer than what it edits, even when the version it edits came
+        // from a device whose clock runs ahead; otherwise that version would win the merge.
+        const updatedAt = (changes as { updatedAt?: unknown }).updatedAt
+        const previous = (record as { updatedAt?: unknown }).updatedAt
+        if (typeof updatedAt === 'number' && typeof previous === 'number' && updatedAt <= previous) {
+          return { synced: 0, updatedAt: previous + 1 }
+        }
+        return { synced: 0 }
+      })
+    }
+  }
+
+  /** A read-write transaction for data from the account: its writes stay marked as synced. */
+  fromAccount<T>(tables: Dexie.Table[], scope: () => Promise<T>): Promise<T> {
+    return this.transaction('rw', tables, (tx) => {
+      accountTransactions.add(tx)
+      return scope()
+    })
   }
 }
 

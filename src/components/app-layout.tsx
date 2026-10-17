@@ -1,4 +1,6 @@
 import { Outlet } from 'react-router'
+import { NewPasswordDialog } from '@/components/account/new-password-dialog'
+import { SignInDialog } from '@/components/account/sign-in-dialog'
 import { PromptLibraryDialog } from '@/components/prompt-library-dialog'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { Sidebar } from '@/components/sidebar'
@@ -43,6 +45,8 @@ export function AppLayout() {
       </main>
       <SettingsDialog />
       <PromptLibraryDialog />
+      <SignInDialog />
+      <NewPasswordDialog />
     </div>
   )
 }

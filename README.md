@@ -1,8 +1,8 @@
 # aimvp-chat
 
 A fast, mobile-friendly AI chat app at [chat.aimvp.app](https://chat.aimvp.app). Chat with hundreds of models using
-**your own API keys** for [OpenRouter](https://openrouter.ai), OpenAI, Anthropic and Google Gemini. Your keys and
-your chats never touch an aimvp server.
+**your own API keys** for [OpenRouter](https://openrouter.ai), OpenAI, Anthropic and Google Gemini. Your keys
+never touch an aimvp server. Your chats don't either, unless you sign in to sync them across devices.
 
 ## Features
 
@@ -21,6 +21,8 @@ your chats never touch an aimvp server.
 - Voice input (browser speech recognition or OpenAI transcription) and read aloud (browser voices or OpenAI TTS)
 - Prompt library: save prompts and insert them with `/` in the composer; `{{blanks}}` are selected to fill in
 - Chat history and projects stored in the browser (IndexedDB), with rename, delete, and JSON export/import
+- Optional account (Google, GitHub, or email and password) that syncs chats, projects, prompts, attached files and
+  preferences across devices through Supabase; API keys stay on each device
 - Search across chat titles and message text, ignoring accents ("ha noi" finds "Hà Nội"), jumping to the match
 - Projects: folders for chats with shared instructions and files, created in one step from the sidebar
 - Download a chat as Markdown, or print / save it as PDF
@@ -36,17 +38,18 @@ your chats never touch an aimvp server.
 Browser (React SPA)
  ├─ IndexedDB (Dexie)    projects, conversations, messages, file blobs, saved prompts
  ├─ localStorage         settings + the user's API keys
- └─ streaming requests ─┬─► openrouter.ai                       (Chat Completions)
-                        ├─► api.openai.com                      (Chat Completions)
-                        ├─► api.anthropic.com                   (Messages API, official SDK)
-                        └─► generativelanguage.googleapis.com   (Gemini streamGenerateContent)
-Cloudflare Workers       serves the static build only (no backend yet)
+ ├─ streaming requests ─┬─► openrouter.ai                       (Chat Completions)
+ │                      ├─► api.openai.com                      (Chat Completions)
+ │                      ├─► api.anthropic.com                   (Messages API, official SDK)
+ │                      └─► generativelanguage.googleapis.com   (Gemini streamGenerateContent)
+ └─ when signed in ─────► Supabase                              (Auth, sync_records table, attachments bucket)
+Cloudflare Workers       serves the static build only
 ```
 
 Requests go straight from the browser to the provider, so there is no proxy to run, pay for, or trust. Models
 are referenced as `provider:model-id` (e.g. `anthropic:claude-opus-5-5`). Every
-record has a client-generated UUID, `updatedAt` and a `deletedAt` tombstone, so the data can later sync to a
-server (e.g. Cloudflare D1) without a schema rewrite.
+record has a client-generated UUID, `updatedAt` and a `deletedAt` tombstone. When signed in, records sync with the
+account by last write wins; see [supabase/README.md](supabase/README.md).
 
 | Path                       | What lives there                                       |
 | -------------------------- | ------------------------------------------------------ |
@@ -59,6 +62,9 @@ server (e.g. Cloudflare D1) without a schema rewrite.
 | `src/lib/speech.ts`, `read-aloud.ts` | Voice input and read-aloud helpers           |
 | `src/lib/search.ts`        | Accent-insensitive matching for chat search            |
 | `src/lib/usage.ts`, `pricing.ts` | Usage stats and cost estimates                   |
+| `src/lib/sync.ts`          | Sync with the signed-in account (pull, push, files, preferences) |
+| `src/lib/account.ts`, `supabase.ts` | Supabase sign-in, session and the sync loop   |
+| `supabase/schema.sql`      | Table, function, storage bucket and policies to run in Supabase |
 | `src/stores/`              | Zustand stores: settings, model catalog, UI, streams   |
 | `src/components/`          | UI (shadcn-style components on Radix + Tailwind v4)    |
 | `public/_headers`          | Security headers (CSP etc.) served by Cloudflare       |
@@ -100,14 +106,15 @@ First run of the e2e tests on a new machine: `npx playwright install chromium`.
      deploys, and other branches get preview URLs.
    - **From your machine:** `npx wrangler login`, then `npm run deploy`.
 
-No secrets or environment variables are needed: the app holds no keys of its own.
+No secrets are needed: the app holds no keys of its own. For accounts, set the two public `VITE_SUPABASE_*` build
+variables described in [supabase/README.md](supabase/README.md); without them, sign-in is hidden.
 
 ## Security model
 
 - Keys are the user's own, stored in `localStorage`, and each is sent only to its provider. Keys from
   "Connect OpenRouter" can be capped or revoked by the user at openrouter.ai/settings/keys.
 - The main risk to a browser-held key is XSS, so: a strict CSP (`connect-src` allows only the four provider
-  APIs), no third-party scripts or analytics, model output rendered without raw HTML, and remote images in model output
+  APIs and Supabase), no third-party scripts or analytics, model output rendered without raw HTML, and remote images in model output
   shown as links (never fetched, so a prompt injection can't leak the chat through an image URL). Web search sources
   are kept only if they are http(s) links.
 - Files are read in the browser and sent only to the chosen model's provider. The microphone is allowed for this
@@ -117,9 +124,10 @@ No secrets or environment variables are needed: the app holds no keys of its own
 - Cost estimates for OpenAI, Anthropic and Gemini use OpenRouter's public model list, fetched without any key.
 - Chats live in the browser. The app asks for persistent storage; installing it as a PWA and exporting
   backups protects history from browser eviction (notably Safari).
+- Signing in is optional. Synced data sits in the user's own rows and folder in Supabase, guarded by row-level
+  security. API keys are never synced. The build holds only Supabase's publishable key.
 
 ## Roadmap
 
-- Accounts and multi-device sync (Cloudflare D1, reusing the current schema)
 - Large document collections with retrieval (R2 + Vectorize)
 - Sharing conversations

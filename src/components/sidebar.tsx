@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, NavLink, useNavigate, useParams } from 'react-router'
+import { AccountButton } from '@/components/account/account-button'
 import { NameDialog } from '@/components/name-dialog'
 import {
   AlertDialog,
@@ -34,6 +35,7 @@ import { stopStreaming } from '@/lib/chat'
 import type { Conversation, Project } from '@/lib/db'
 import { createProject, deleteConversation, groupByDate, updateConversation } from '@/lib/repo'
 import type { TextMatch } from '@/lib/search'
+import { accountsEnabled } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import { useIsStreaming } from '@/stores/streams'
 import { useUI } from '@/stores/ui'
@@ -152,16 +154,20 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
       {showUsage && <UsageWidget onNavigate={onNavigate} />}
       <div className="flex shrink-0 gap-1 border-t p-2 pb-[max(env(safe-area-inset-bottom),0.5rem)]">
+        {accountsEnabled && <AccountButton onNavigate={onNavigate} />}
         <Button
           variant="ghost"
-          className="flex-1 justify-start"
+          size={accountsEnabled ? 'icon' : 'default'}
+          className={accountsEnabled ? 'text-muted-foreground' : 'flex-1 justify-start'}
+          aria-label="Settings"
+          title="Settings"
           onClick={() => {
             onNavigate?.()
             setSettingsOpen(true)
           }}
         >
           <SettingsIcon />
-          Settings
+          {!accountsEnabled && 'Settings'}
         </Button>
         <Button variant="ghost" size="icon" className="text-muted-foreground" asChild>
           <NavLink to="/usage" onClick={onNavigate} aria-label="Usage" title="Usage">
