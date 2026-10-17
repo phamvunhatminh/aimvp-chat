@@ -18,6 +18,10 @@ create index if not exists sync_records_user_modified on public.sync_records (us
 
 alter table public.sync_records enable row level security;
 
+-- Explicit, so this works whether or not the project exposes new tables automatically.
+revoke all on public.sync_records from anon;
+grant select, insert, update on public.sync_records to authenticated;
+
 drop policy if exists "Users read their own records" on public.sync_records;
 create policy "Users read their own records" on public.sync_records
   for select to authenticated
