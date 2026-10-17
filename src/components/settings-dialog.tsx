@@ -44,7 +44,7 @@ import { browserRecognition, canSpeakInBrowser, OPENAI_VOICES, resolveEngine, SP
 import { cn } from '@/lib/utils'
 import { usePrompts } from '@/hooks/use-data'
 import { useMediaQuery } from '@/hooks/use-media-query'
-import { useSettings, type SpeechEngine, type Theme } from '@/stores/settings'
+import { useSettings, type PdfMode, type SpeechEngine, type Theme } from '@/stores/settings'
 import { useStreams } from '@/stores/streams'
 import { useUI, type SettingsTab } from '@/stores/ui'
 
@@ -94,6 +94,7 @@ export function SettingsDialog() {
           <div className="min-h-0 flex-1 overflow-y-auto">
             <Tabs.Content value="general" className="divide-y outline-none">
               <DefaultsSection />
+              <FilesSection />
               <AppearanceSection />
             </Tabs.Content>
             <Tabs.Content value="keys" className="outline-none">
@@ -466,6 +467,38 @@ const themes: { value: Theme; label: string; icon: typeof SunIcon }[] = [
   { value: 'light', label: 'Light', icon: SunIcon },
   { value: 'dark', label: 'Dark', icon: MoonIcon },
 ]
+
+const PDF_MODES: { value: PdfMode; label: string; note: string }[] = [
+  { value: 'file', label: 'Whole file', note: 'Sees layout, tables, charts and scans' },
+  { value: 'text', label: 'Text only', note: 'Several times fewer tokens' },
+]
+
+function FilesSection() {
+  const pdfMode = useSettings((s) => s.pdfMode)
+  const setPdfMode = useSettings((s) => s.setPdfMode)
+  return (
+    <Section
+      title="PDF files"
+      description="How attached PDFs are sent to Claude and Gemini, which can read the file itself. Other models always get the text. Earlier messages are cached, so a file costs full price mostly on the turn you attach it."
+    >
+      <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Send PDFs as">
+        {PDF_MODES.map(({ value, label, note }) => (
+          <Button
+            key={value}
+            variant="outline"
+            role="radio"
+            aria-checked={pdfMode === value}
+            onClick={() => setPdfMode(value)}
+            className={cn('h-auto flex-col gap-0 py-2', pdfMode === value && 'border-foreground')}
+          >
+            {label}
+            <span className="text-xs font-normal text-muted-foreground">{note}</span>
+          </Button>
+        ))}
+      </div>
+    </Section>
+  )
+}
 
 function AppearanceSection() {
   const theme = useSettings((s) => s.theme)

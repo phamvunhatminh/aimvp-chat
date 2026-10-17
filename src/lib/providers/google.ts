@@ -34,7 +34,13 @@ interface GeminiChunk {
     /** Pages Google Search found, when grounding is on. */
     groundingMetadata?: { groundingChunks?: { web?: { uri?: string; title?: string } }[] }
   }[]
-  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number }
+  usageMetadata?: {
+    promptTokenCount?: number
+    candidatesTokenCount?: number
+    thoughtsTokenCount?: number
+    /** Prompt tokens served from Gemini's implicit cache. */
+    cachedContentTokenCount?: number
+  }
 }
 
 /** Gemini reports a bad key as 400 INVALID_ARGUMENT, and a disabled one as 403. */
@@ -178,6 +184,7 @@ export const google: ProviderClient = {
         usage: {
           promptTokens: usage.promptTokenCount ?? 0,
           completionTokens: (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0),
+          cachedTokens: usage.cachedContentTokenCount,
         },
       }
     }

@@ -29,6 +29,8 @@ export interface UsageTotals {
   unpriced: number
   promptTokens: number
   completionTokens: number
+  /** Input tokens read from prompt caches (part of `promptTokens`). */
+  cachedTokens: number
   replies: number
 }
 
@@ -74,6 +76,7 @@ const emptyTotals = (): UsageTotals => ({
   unpriced: 0,
   promptTokens: 0,
   completionTokens: 0,
+  cachedTokens: 0,
   replies: 0,
 })
 
@@ -191,6 +194,7 @@ export function computeUsage({
       if (!usage) continue
       t.promptTokens += usage.promptTokens
       t.completionTokens += usage.completionTokens
+      t.cachedTokens += usage.cachedTokens ?? 0
       if (cost) {
         t.cost += cost.cost
         if (cost.estimated) t.estimatedCost += cost.cost

@@ -15,7 +15,7 @@ export interface ModelInfo {
   contextLength?: number | null
   maxOutputTokens?: number | null
   /** USD per token, as strings (OpenRouter only). */
-  pricing?: { prompt?: string; completion?: string }
+  pricing?: { prompt?: string; completion?: string; input_cache_read?: string; input_cache_write?: string }
   /** Supports streamed reasoning that the app should ask for (Anthropic adaptive thinking). */
   reasoning?: boolean
   /** What the model can read besides text, when the provider says (absent = unknown). */
@@ -60,8 +60,14 @@ export function documentAsText(name: string, text: string): string {
 }
 
 export interface Usage {
+  /** All input tokens, including those read from or written to the provider's prompt cache. */
   promptTokens: number
   completionTokens: number
+  /** Input tokens read from the prompt cache (billed at a fraction of the input price). */
+  cachedTokens?: number
+  /** Input tokens written to the prompt cache (Anthropic bills these at a premium). */
+  cacheWriteTokens?: number
+  /** Exact USD cost, when the provider reports it (OpenRouter). */
   cost?: number
 }
 

@@ -43,7 +43,10 @@ async function toContentPart(a: Attachment): Promise<ContentPart> {
       ? { type: 'image', mimeType: blob.mimeType, data: bytesToBase64(blob.data) }
       : { type: 'text', text: `[Image "${a.name}" is no longer available.]` }
   }
-  if (a.mimeType === 'application/pdf' && blob) {
+  // "Text only" sends the text read in the browser, far fewer tokens than the pages themselves.
+  // Scans have no text, so they still go as the file.
+  const textOnly = useSettings.getState().pdfMode === 'text' && a.text.trim() !== ''
+  if (a.mimeType === 'application/pdf' && blob && !textOnly) {
     return { type: 'document', name: a.name, data: bytesToBase64(blob.data), text: a.text }
   }
   return { type: 'text', text: documentAsText(a.name, a.text) }

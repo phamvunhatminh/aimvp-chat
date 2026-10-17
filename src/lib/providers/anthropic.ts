@@ -109,12 +109,17 @@ export const anthropic: ProviderClient = {
       ...(system ? { system } : {}),
       // Summarized thinking streams while the model reasons, instead of a silent pause.
       ...(modelInfo?.reasoning ? { thinking: { type: 'adaptive', display: 'summarized' } } : {}),
+      // Automatic prompt caching: each turn caches the conversation so far, so the next one reads
+      // it (files included) at about a tenth of the input price instead of paying for it again.
+      cache_control: { type: 'ephemeral' },
       ...(webSearch ? { tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: MAX_SEARCHES }] } : {}),
     }
 
     let wroteText = false
     let promptTokens = 0
     let completionTokens = 0
+    let cachedTokens = 0
+    let cacheWriteTokens = 0
     let cited = false
     const found: Source[] = []
     try {
@@ -140,6 +145,8 @@ export const anthropic: ProviderClient = {
           }
         }
         const message = await stream.finalMessage()
+        cachedTokens += message.usage.cache_read_input_tokens ?? 0
+        cacheWriteTokens += message.usage.cache_creation_input_tokens ?? 0
         promptTokens +=
           message.usage.input_tokens +
           (message.usage.cache_read_input_tokens ?? 0) +
@@ -158,7 +165,15 @@ export const anthropic: ProviderClient = {
       }
       // Without inline citations, list what the searches found.
       if (!cited && found.length) yield { type: 'sources', sources: found }
-      yield { type: 'usage', usage: { promptTokens, completionTokens } }
+      yield {
+        type: 'usage',
+        usage: {
+          promptTokens,
+          completionTokens,
+          cachedTokens: cachedTokens || undefined,
+          cacheWriteTokens: cacheWriteTokens || undefined,
+        },
+      }
     } catch (err) {
       throw toProviderError(err)
     }

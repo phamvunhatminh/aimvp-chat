@@ -90,7 +90,11 @@ test('send a message with a chosen model and system prompt', async ({ page, open
     stream: true,
     messages: [
       { role: 'system', content: 'Answer like a pirate.' },
-      { role: 'user', content: 'How do I greet someone?' },
+      // Claude caches only marked prompts, so the conversation so far is marked for the next turn.
+      {
+        role: 'user',
+        content: [{ type: 'text', text: 'How do I greet someone?', cache_control: { type: 'ephemeral' } }],
+      },
     ],
   })
 })

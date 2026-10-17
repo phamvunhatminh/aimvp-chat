@@ -3,7 +3,7 @@ import { useSettings } from '@/stores/settings'
 import { useStreams } from '@/stores/streams'
 import { contentChunk, dataEvent, jsonResponse, sseResponse } from '@/test/sse-response'
 import { buildPrompt, editAndResend, regenerate, sendMessage, stopStreaming } from './chat'
-import { db, type Message } from './db'
+import { db, type Attachment, type Message } from './db'
 import type { PreparedFile } from './files'
 import {
   addProjectFiles,
@@ -12,6 +12,7 @@ import {
   deleteConversation,
   getConversation,
   getMessages,
+  saveBlob,
 } from './repo'
 
 beforeEach(async () => {
@@ -304,6 +305,26 @@ describe('regenerate and edit', () => {
       ['assistant', 'a1-edited', 'done'],
     ])
     expect(JSON.parse(fetchMock.mock.calls[2][1].body).messages).toEqual([{ role: 'user', content: 'q1 edited' }])
+  })
+})
+
+describe('PDF attachments', () => {
+  it('go as the file, or as their text when the setting says so', async () => {
+    const blobId = await saveBlob(new Uint8Array([37, 80, 68, 70]).buffer, 'application/pdf')
+    const pdf: Attachment = { id: 'p', kind: 'file', name: 'a.pdf', mimeType: 'application/pdf', size: 4, text: 'Page one', blobId }
+    const message = { role: 'user', content: 'Sum up', status: 'done', attachments: [pdf] } as Message
+    const firstPart = async () => {
+      const [m] = await buildPrompt([], [message])
+      return (m.content as { type: string }[])[0]
+    }
+
+    expect(await firstPart()).toMatchObject({ type: 'document', name: 'a.pdf', data: 'JVBERg==' })
+    useSettings.setState({ pdfMode: 'text' })
+    expect(await firstPart()).toEqual({ type: 'text', text: '<file name="a.pdf">\nPage one\n</file>' })
+    // A scan has no text, so it still goes as the file.
+    message.attachments = [{ ...pdf, text: '' }]
+    expect(await firstPart()).toMatchObject({ type: 'document' })
+    useSettings.setState({ pdfMode: 'file' })
   })
 })
 

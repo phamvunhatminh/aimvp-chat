@@ -1,5 +1,5 @@
 import { httpError, readErrorBody } from './errors'
-import { streamChatCompletions, toChatCompletionsMessages } from './openai-compatible'
+import { streamChatCompletions, toChatCompletionsMessages, withCacheBreakpoint } from './openai-compatible'
 import { makesImages, type ModelInfo, type ProviderClient } from './types'
 
 export const OPENROUTER_API = 'https://openrouter.ai/api/v1'
@@ -17,7 +17,7 @@ interface ORModel {
   name: string
   created?: number
   context_length?: number | null
-  pricing?: { prompt?: string; completion?: string }
+  pricing?: { prompt?: string; completion?: string; input_cache_read?: string; input_cache_write?: string }
   architecture?: { input_modalities?: string[]; output_modalities?: string[] }
 }
 
@@ -46,7 +46,12 @@ export const openrouter: ProviderClient = {
           name: m.name,
           created: m.created,
           contextLength: m.context_length,
-          pricing: m.pricing && { prompt: m.pricing.prompt, completion: m.pricing.completion },
+          pricing: m.pricing && {
+            prompt: m.pricing.prompt,
+            completion: m.pricing.completion,
+            input_cache_read: m.pricing.input_cache_read,
+            input_cache_write: m.pricing.input_cache_write,
+          },
           inputs: m.architecture?.input_modalities && {
             image: m.architecture.input_modalities.includes('image'),
             pdf: m.architecture.input_modalities.includes('file'),
@@ -70,7 +75,10 @@ export const openrouter: ProviderClient = {
       apiKey,
       body: {
         model,
-        messages: toChatCompletionsMessages(messages),
+        // Claude caches only marked prompts; other models on OpenRouter cache automatically.
+        messages: model.startsWith('anthropic/')
+          ? withCacheBreakpoint(toChatCompletionsMessages(messages))
+          : toChatCompletionsMessages(messages),
         stream: true,
         usage: { include: true },
         // Image models only return images when asked for them.

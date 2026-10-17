@@ -131,6 +131,24 @@ describe('OpenRouter', () => {
     expect(req.body).toMatchObject({ model: 'a/b', stream: true, messages })
   })
 
+  it('marks Claude conversations for prompt caching, and reports cached tokens', async () => {
+    const usage = { prompt_tokens: 900, completion_tokens: 10, cost: 0.001, prompt_tokens_details: { cached_tokens: 800 } }
+    const fetchMock = mockFetch(
+      sseResponse([dataEvent({ choices: [{ delta: { content: 'ok' } }], usage }), 'data: [DONE]\n\n']),
+      sseResponse(['data: [DONE]\n\n']),
+    )
+    const history = [...messages, { role: 'assistant' as const, content: 'hello' }, { role: 'user' as const, content: 'again' }]
+    const events = await collect(openrouter, { apiKey: 'k', model: 'anthropic/claude-sonnet-5.5', messages: history })
+    expect(events.at(-1)).toMatchObject({ type: 'usage', usage: { promptTokens: 900, cachedTokens: 800 } })
+    expect(requestOf(fetchMock).body.messages.at(-1)).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: 'again', cache_control: { type: 'ephemeral' } }],
+    })
+    // Other models cache by themselves and get the messages unchanged.
+    await collect(openrouter, { apiKey: 'k', model: 'openai/gpt-5', messages: history })
+    expect(requestOf(fetchMock, 1).body.messages.at(-1)).toEqual({ role: 'user', content: 'again' })
+  })
+
   it('maps HTTP and mid-stream errors', async () => {
     mockFetch(jsonResponse({ error: { message: 'Insufficient credits' } }, 402))
     const credits = await collectUntilError(openrouter, { apiKey: 'k', model: 'a/b', messages })
@@ -294,7 +312,17 @@ describe('Anthropic', () => {
       system: 'Be brief.',
       messages: [{ role: 'user', content: 'hi' }],
       thinking: { type: 'adaptive', display: 'summarized' },
+      cache_control: { type: 'ephemeral' },
       stream: true,
+    })
+  })
+
+  it('reports prompt cache reads and writes', async () => {
+    mockFetch(anthropicStream({ text: ['ok'], usage: { cache_read_input_tokens: 40_000, cache_creation_input_tokens: 300 } }))
+    const events = await collect(anthropic, { apiKey: 'k', model: 'm', messages })
+    expect(events.at(-1)).toEqual({
+      type: 'usage',
+      usage: { promptTokens: 40_310, completionTokens: 5, cachedTokens: 40_000, cacheWriteTokens: 300 },
     })
   })
 

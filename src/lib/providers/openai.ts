@@ -93,7 +93,7 @@ interface ResponsesEvent {
   delta?: string
   annotation?: Annotation
   response?: {
-    usage?: { input_tokens?: number; output_tokens?: number }
+    usage?: { input_tokens?: number; output_tokens?: number; input_tokens_details?: { cached_tokens?: number } }
     error?: { message?: string } | null
     output?: { content?: { annotations?: Annotation[] }[] }[]
   }
@@ -136,7 +136,14 @@ async function* streamWithWebSearch({ apiKey, model, messages, signal }: ChatReq
       }
       const usage = event.response?.usage
       if (usage) {
-        yield { type: 'usage', usage: { promptTokens: usage.input_tokens ?? 0, completionTokens: usage.output_tokens ?? 0 } }
+        yield {
+          type: 'usage',
+          usage: {
+            promptTokens: usage.input_tokens ?? 0,
+            completionTokens: usage.output_tokens ?? 0,
+            cachedTokens: usage.input_tokens_details?.cached_tokens,
+          },
+        }
       }
     } else if (event.type === 'response.failed' || event.type === 'error') {
       throw httpError('openai', null, event.response?.error?.message ?? event.message ?? 'OpenAI stopped the reply.')
