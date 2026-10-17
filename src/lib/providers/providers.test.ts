@@ -10,7 +10,7 @@ import {
 import { anthropic } from './anthropic'
 import { ProviderError } from './errors'
 import { google, toGeminiContents } from './google'
-import { normalizeModelRef, parseModelRef } from './models'
+import { normalizeModelRef, parseModelRef, suggestedModel } from './models'
 import { openai, synthesizeSpeech, transcribeAudio } from './openai'
 import { fetchKeyInfo, openrouter } from './openrouter'
 import type { ChatRequest, ProviderClient, StreamEvent } from './types'
@@ -67,6 +67,30 @@ describe('model references', () => {
     expect(parseModelRef('meta-llama/llama-3:free')).toEqual({ provider: 'openrouter', model: 'meta-llama/llama-3:free' })
     expect(normalizeModelRef('openai/gpt-4o')).toBe('openrouter:openai/gpt-4o')
     expect(normalizeModelRef('openai:gpt-5')).toBe('openai:gpt-5')
+  })
+})
+
+describe('suggestedModel', () => {
+  const ids = (...list: string[]) => list.map((id, i) => ({ id, created: 100 - i }))
+
+  it("picks each provider's newest everyday model", () => {
+    expect(suggestedModel('anthropic', ids('claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-4-5', 'claude-haiku-5-5'))).toBe(
+      'claude-sonnet-5-5',
+    )
+    expect(suggestedModel('openai', ids('gpt-5.1-mini', 'gpt-5.1', 'gpt-5', 'gpt-4o', 'o3'))).toBe('gpt-5.1')
+    // Gemini lists carry no dates; the version number decides.
+    expect(
+      suggestedModel('google', [{ id: 'gemini-2.5-flash' }, { id: 'gemini-3-flash' }, { id: 'gemini-3-flash-preview' }]),
+    ).toBe('gemini-3-flash')
+  })
+
+  it('skips image models, falls back to any model, and waits for the list', () => {
+    expect(suggestedModel('google', [{ id: 'gemini-3-flash-image', outputs: { image: true } }, { id: 'gemma-3' }])).toBe(
+      'gemma-3',
+    )
+    expect(suggestedModel('anthropic', ids('claude-opus-5-5'))).toBe('claude-opus-5-5')
+    expect(suggestedModel('openai', [])).toBeNull()
+    expect(suggestedModel('openrouter', [])).toBe('openrouter/auto')
   })
 })
 

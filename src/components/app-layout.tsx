@@ -3,6 +3,7 @@ import { PromptLibraryDialog } from '@/components/prompt-library-dialog'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { Sidebar } from '@/components/sidebar'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
+import { useUsableDefaultModel } from '@/hooks/use-fallback-model'
 import { cn } from '@/lib/utils'
 import { useSettings } from '@/stores/settings'
 import { useUI } from '@/stores/ui'
@@ -11,6 +12,7 @@ export function AppLayout() {
   const sidebarOpen = useUI((s) => s.sidebarOpen)
   const setSidebarOpen = useUI((s) => s.setSidebarOpen)
   const collapsed = useSettings((s) => s.sidebarCollapsed)
+  useUsableDefaultModel()
 
   return (
     <div className="flex h-dvh overflow-hidden print:block print:h-auto print:overflow-visible">
