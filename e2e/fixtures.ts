@@ -37,6 +37,19 @@ export const ANSWER = [
 
 export const SEARCH_ANSWER = 'Here is what the web says.'
 
+/** An SVG reply, with a script and a remote image that must never run or load. */
+export const SVG_ANSWER = [
+  'Here is a blue circle:',
+  '',
+  '```svg',
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" onload="window.__svgPwned = true">',
+  '  <script>window.__svgPwned = true</script>',
+  '  <image href="https://evil.example/tracker.png" width="1" height="1"/>',
+  '  <circle cx="32" cy="32" r="28" fill="#1e5adc"/>',
+  '</svg>',
+  '```',
+].join('\n')
+
 export const OAUTH_KEY = 'sk-or-v1-oauth-0123456789'
 
 /** What the mocked image model "paints". */
@@ -200,6 +213,9 @@ async function mockOpenRouter(context: BrowserContext): Promise<OpenRouterMock> 
           body: `data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`,
           headers: { ...headers, 'Content-Type': 'text/event-stream' },
         })
+      }
+      if (JSON.stringify(body.messages).includes('Draw an SVG')) {
+        return route.fulfill({ body: sse(SVG_ANSWER), headers: { ...headers, 'Content-Type': 'text/event-stream' } })
       }
       if (body.model === 'openai/broke') {
         return route.fulfill({ status: 402, json: { error: { code: 402, message: 'Insufficient credits' } }, headers })

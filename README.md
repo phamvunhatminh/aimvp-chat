@@ -12,7 +12,8 @@ your chats never touch an aimvp server.
 - New chats start with the message box in the middle and a few suggestions; the sidebar can be hidden on wide
   screens
 - Streaming replies with stop, regenerate, edit-and-resend, and "thinking" output for reasoning models
-- Markdown, tables and syntax-highlighted code with copy and download buttons
+- Markdown, tables and syntax-highlighted code with copy and download buttons; SVG code shows as an image,
+  downloadable as PNG or SVG
 - Attach images, PDFs, Word, Excel and text/code files (paste, drop or pick); PDFs go natively to Claude and
   Gemini, as extracted text elsewhere
 - Image generation with image models (OpenRouter, OpenAI gpt-image/DALL·E, Gemini image models)
