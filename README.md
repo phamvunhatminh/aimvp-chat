@@ -1,8 +1,8 @@
 # aimvp-chat
 
-A fast, mobile-friendly AI chat app at [chat.aimvp.app](https://chat.aimvp.app). Chat with hundreds of models using
-**your own API keys** for [OpenRouter](https://openrouter.ai), OpenAI, Anthropic and Google Gemini. Your keys
-never touch an aimvp server. Your chats don't either, unless you sign in to sync them across devices.
+Asking Here: a fast, mobile-friendly AI chat app at [askinghere.com](https://askinghere.com). Chat with
+hundreds of models using **your own API keys** for [OpenRouter](https://openrouter.ai), OpenAI, Anthropic and
+Google Gemini. Your keys never touch our server. Your chats don't either, unless you sign in to sync them across devices.
 
 ## Features
 
@@ -97,9 +97,11 @@ First run of the e2e tests on a new machine: `npx playwright install chromium`.
 
 ## Deploying to Cloudflare
 
-1. Add the `aimvp.app` zone to your Cloudflare account. `wrangler.jsonc` attaches `chat.aimvp.app` as the
-   Worker's custom domain. Each deploy replaces the Worker's custom domains with that list, so change domains
-   there rather than in the dashboard.
+1. Add the `askinghere.com` and `aimvp.app` zones to your Cloudflare account. `wrangler.jsonc` attaches
+   `askinghere.com` and the old `chat.aimvp.app` as the Worker's custom domains. Each deploy replaces the Worker's
+   custom domains with that list, so change domains there rather than in the dashboard. Chats and keys live in
+   each origin's browser storage: to move from `chat.aimvp.app`, sign in on both (chats sync; keys don't) or
+   export there and import here.
 2. Pick one:
    - **Git integration (recommended):** Cloudflare dashboard → Workers & Pages → Create → Import a repository →
      select this repo. Build command `npm run build`, deploy command `npx wrangler deploy`. Every push to `main`

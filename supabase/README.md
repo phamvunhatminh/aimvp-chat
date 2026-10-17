@@ -21,8 +21,9 @@ VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 
    Running the file again is safe.
 3. **Set the redirect URLs.** Under **Authentication → URL Configuration**:
-   - **Site URL:** `https://chat.aimvp.app`
-   - **Redirect URLs:** `https://chat.aimvp.app/**` and `http://localhost:3000/**`, plus a pattern for preview deploys if you use them.
+   - **Site URL:** `https://askinghere.com`
+   - **Redirect URLs:** `https://askinghere.com/**`, `https://chat.aimvp.app/**` (the old address, while users move
+     over) and `http://localhost:3000/**`, plus a pattern for preview deploys if you use them.
 
    Supabase sends users back to `/auth/account?sb_flow_id=…`. The `/**` pattern lets that query string through.
 4. **Turn on the sign-in methods** under **Authentication → Sign In / Providers**. Each provider asks for the callback

@@ -15,8 +15,8 @@ export default defineConfig({
       // index.html sets light/dark theme-color itself.
       pwaAssets: { config: true, injectThemeColor: false },
       manifest: {
-        name: 'aimvp',
-        short_name: 'aimvp',
+        name: 'Asking Here',
+        short_name: 'Asking Here',
         description: 'Chat with any AI model using your own OpenRouter key.',
         theme_color: '#18181b',
         background_color: '#18181b',
