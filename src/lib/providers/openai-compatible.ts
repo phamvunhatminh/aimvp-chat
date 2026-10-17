@@ -37,7 +37,12 @@ interface ChunkPayload {
     }
     message?: { annotations?: Annotation[] }
   }[]
-  usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number }
+  usage?: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    cost?: number
+    prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number }
+  }
 }
 
 /** Chat Completions messages: images as data URLs; documents as their extracted text. */
@@ -53,6 +58,23 @@ export function toChatCompletionsMessages(messages: ChatMessage[]) {
             return { type: 'text', text: p.text }
           }),
   }))
+}
+
+/**
+ * Marks the end of the conversation for prompt caching (Anthropic models through OpenRouter,
+ * which only cache what is marked). Each turn caches everything so far, so the next turn
+ * reads earlier messages and files from the cache instead of paying full price again.
+ */
+export function withCacheBreakpoint<T extends { role: string; content: unknown }>(messages: T[]): T[] {
+  const last = messages.at(-1)
+  if (!last) return messages
+  type Part = { type: string; [key: string]: unknown }
+  const parts: Part[] =
+    typeof last.content === 'string' ? [{ type: 'text', text: last.content }] : [...(last.content as Part[])]
+  const end = parts.at(-1)
+  if (!end) return messages
+  parts[parts.length - 1] = { ...end, cache_control: { type: 'ephemeral' } }
+  return [...messages.slice(0, -1), { ...last, content: parts }]
 }
 
 /** Maps a provider's error status (and body) onto the statuses `httpError` understands. */
@@ -108,6 +130,8 @@ export async function* streamChatCompletions(opts: {
         usage: {
           promptTokens: chunk.usage.prompt_tokens ?? 0,
           completionTokens: chunk.usage.completion_tokens ?? 0,
+          cachedTokens: chunk.usage.prompt_tokens_details?.cached_tokens,
+          cacheWriteTokens: chunk.usage.prompt_tokens_details?.cache_write_tokens,
           cost: chunk.usage.cost,
         },
       }

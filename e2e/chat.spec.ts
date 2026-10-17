@@ -12,6 +12,39 @@ test('first run: paste an API key', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Remove' })).toBeVisible()
 })
 
+test('with only an Anthropic key, new chats default to Claude', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Use an OpenAI, Anthropic or Google key' }).click()
+  await page.getByLabel('Anthropic API key').fill('sk-ant-api03-0123456789')
+  await page.getByLabel('Anthropic API key').press('Enter')
+  await expect(page.getByText('Anthropic key saved')).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  await expect(page.getByRole('button', { name: 'Claude Opus 5.5' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Add key' })).toHaveCount(0)
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Claude Opus 5.5' })).toBeVisible()
+})
+
+test('a chat on a provider without a key offers a model that has one', async ({ page }) => {
+  await openWithKey(page)
+  await composer(page).fill('Hello')
+  await page.getByRole('button', { name: 'Send message' }).click()
+  await expect(page.locator('.markdown pre')).toBeVisible()
+
+  // Swap the OpenRouter key for an Anthropic one.
+  await page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('aimvp.settings')!)
+    saved.state.apiKeys = { anthropic: 'sk-ant-api03-0123456789' }
+    localStorage.setItem('aimvp.settings', JSON.stringify(saved))
+  })
+  await page.reload()
+  await expect(page.getByText('Auto Router runs on OpenRouter.')).toBeVisible()
+  await page.getByRole('button', { name: 'Use Claude Opus 5.5' }).click()
+  await expect(page.getByText('Auto Router runs on OpenRouter.')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Claude Opus 5.5' })).toBeVisible()
+})
+
 test('OAuth callback stores the key and redeems the code once', async ({ page, openrouter }) => {
   await page.goto('/')
   await page.evaluate(() => sessionStorage.setItem('aimvp.oauth.verifier', 'test-verifier'))
@@ -57,7 +90,11 @@ test('send a message with a chosen model and system prompt', async ({ page, open
     stream: true,
     messages: [
       { role: 'system', content: 'Answer like a pirate.' },
-      { role: 'user', content: 'How do I greet someone?' },
+      // Claude caches only marked prompts, so the conversation so far is marked for the next turn.
+      {
+        role: 'user',
+        content: [{ type: 'text', text: 'How do I greet someone?', cache_control: { type: 'ephemeral' } }],
+      },
     ],
   })
 })
@@ -143,7 +180,10 @@ test('a model whose provider has no key explains what to do', async ({ page }) =
   await page.getByRole('button', { name: 'Auto Router' }).click()
   await page.getByPlaceholder('Search models…').fill('anthropic:claude-opus-5-5')
   await page.getByRole('option', { name: /Use "claude-opus-5-5"/ }).click()
-  await expect(page.getByText('claude-opus-5-5 runs on Anthropic. Add your Anthropic key, or pick another model above.')).toBeVisible()
+  await expect(
+    page.getByText('claude-opus-5-5 runs on Anthropic. Add your Anthropic key, or switch to a model you have a key for.'),
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Use Auto Router' })).toBeVisible()
   await page.getByRole('button', { name: 'Add key' }).click()
   await expect(page.getByLabel('Anthropic API key')).toBeVisible()
 })

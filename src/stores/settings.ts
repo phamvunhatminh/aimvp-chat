@@ -6,6 +6,9 @@ export type Theme = 'system' | 'light' | 'dark'
 
 export type ApiKeys = Partial<Record<ProviderId, string>>
 
+/** How attached PDFs reach models that can read the file itself (Claude, Gemini). */
+export type PdfMode = 'file' | 'text'
+
 /** Who turns speech into text and back: the browser (free) or OpenAI (billed to the OpenAI key). */
 export type SpeechEngine = 'browser' | 'openai'
 
@@ -29,6 +32,7 @@ interface SettingsState {
   monthlyBudget: number | null
   /** The sidebar is hidden on wide screens. */
   sidebarCollapsed: boolean
+  pdfMode: PdfMode
   setApiKey: (provider: ProviderId, apiKey: string | null) => void
   setDefaultModel: (model: string) => void
   setDefaultSystemPrompt: (prompt: string) => void
@@ -37,6 +41,7 @@ interface SettingsState {
   setSpeech: (speech: Partial<Pick<SettingsState, 'speechInput' | 'speechOutput' | 'speechVoice' | 'speechLanguage'>>) => void
   setUsagePrefs: (prefs: Partial<Pick<SettingsState, 'showUsageInSidebar' | 'monthlyBudget'>>) => void
   setSidebarCollapsed: (collapsed: boolean) => void
+  setPdfMode: (mode: PdfMode) => void
 }
 
 type PersistedSettings = Pick<
@@ -53,6 +58,7 @@ type PersistedSettings = Pick<
   | 'showUsageInSidebar'
   | 'monthlyBudget'
   | 'sidebarCollapsed'
+  | 'pdfMode'
 >
 
 /** Providers the user has a key for, in display order. */
@@ -91,6 +97,7 @@ export const useSettings = create<SettingsState>()(
       showUsageInSidebar: true,
       monthlyBudget: null,
       sidebarCollapsed: false,
+      pdfMode: 'file',
       setApiKey: (provider, apiKey) =>
         set((s) => {
           const apiKeys = { ...s.apiKeys }
@@ -110,6 +117,7 @@ export const useSettings = create<SettingsState>()(
       setSpeech: (speech) => set(speech),
       setUsagePrefs: (prefs) => set(prefs),
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
+      setPdfMode: (pdfMode) => set({ pdfMode }),
     }),
     {
       // public/theme-init.js reads `state.theme` from this key before first paint.
@@ -129,6 +137,7 @@ export const useSettings = create<SettingsState>()(
         showUsageInSidebar: s.showUsageInSidebar,
         monthlyBudget: s.monthlyBudget,
         sidebarCollapsed: s.sidebarCollapsed,
+        pdfMode: s.pdfMode,
       }),
     },
   ),

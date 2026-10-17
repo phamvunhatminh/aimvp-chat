@@ -260,6 +260,7 @@ function Kpis({ stats, period }: { stats: UsageStats; period: UsagePeriod }) {
         <span>
           {formatTokens(totals.promptTokens)} in · {formatTokens(totals.completionTokens)} out
         </span>
+        {totals.cachedTokens > 0 && <span>{formatTokens(totals.cachedTokens)} of the input read from cache</span>}
         {tokens > 0 && (
           <div className="flex h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
             <div className="bg-primary/40" style={{ width: `${(totals.promptTokens / tokens) * 100}%` }} />

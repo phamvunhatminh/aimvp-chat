@@ -10,7 +10,7 @@ import {
 import { anthropic } from './anthropic'
 import { ProviderError } from './errors'
 import { google, toGeminiContents } from './google'
-import { normalizeModelRef, parseModelRef } from './models'
+import { normalizeModelRef, parseModelRef, suggestedModel } from './models'
 import { openai, synthesizeSpeech, transcribeAudio } from './openai'
 import { fetchKeyInfo, openrouter } from './openrouter'
 import type { ChatRequest, ProviderClient, StreamEvent } from './types'
@@ -70,6 +70,30 @@ describe('model references', () => {
   })
 })
 
+describe('suggestedModel', () => {
+  const ids = (...list: string[]) => list.map((id, i) => ({ id, created: 100 - i }))
+
+  it("picks each provider's newest everyday model", () => {
+    expect(suggestedModel('anthropic', ids('claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-4-5', 'claude-haiku-5-5'))).toBe(
+      'claude-sonnet-5-5',
+    )
+    expect(suggestedModel('openai', ids('gpt-5.1-mini', 'gpt-5.1', 'gpt-5', 'gpt-4o', 'o3'))).toBe('gpt-5.1')
+    // Gemini lists carry no dates; the version number decides.
+    expect(
+      suggestedModel('google', [{ id: 'gemini-2.5-flash' }, { id: 'gemini-3-flash' }, { id: 'gemini-3-flash-preview' }]),
+    ).toBe('gemini-3-flash')
+  })
+
+  it('skips image models, falls back to any model, and waits for the list', () => {
+    expect(suggestedModel('google', [{ id: 'gemini-3-flash-image', outputs: { image: true } }, { id: 'gemma-3' }])).toBe(
+      'gemma-3',
+    )
+    expect(suggestedModel('anthropic', ids('claude-opus-5-5'))).toBe('claude-opus-5-5')
+    expect(suggestedModel('openai', [])).toBeNull()
+    expect(suggestedModel('openrouter', [])).toBe('openrouter/auto')
+  })
+})
+
 describe('OpenRouter', () => {
   it('lists text and image models sorted by name', async () => {
     mockFetch(
@@ -105,6 +129,24 @@ describe('OpenRouter', () => {
     expect(req.url).toBe('https://openrouter.ai/api/v1/chat/completions')
     expect(req.headers.get('Authorization')).toBe('Bearer sk-or')
     expect(req.body).toMatchObject({ model: 'a/b', stream: true, messages })
+  })
+
+  it('marks Claude conversations for prompt caching, and reports cached tokens', async () => {
+    const usage = { prompt_tokens: 900, completion_tokens: 10, cost: 0.001, prompt_tokens_details: { cached_tokens: 800 } }
+    const fetchMock = mockFetch(
+      sseResponse([dataEvent({ choices: [{ delta: { content: 'ok' } }], usage }), 'data: [DONE]\n\n']),
+      sseResponse(['data: [DONE]\n\n']),
+    )
+    const history = [...messages, { role: 'assistant' as const, content: 'hello' }, { role: 'user' as const, content: 'again' }]
+    const events = await collect(openrouter, { apiKey: 'k', model: 'anthropic/claude-sonnet-5.5', messages: history })
+    expect(events.at(-1)).toMatchObject({ type: 'usage', usage: { promptTokens: 900, cachedTokens: 800 } })
+    expect(requestOf(fetchMock).body.messages.at(-1)).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: 'again', cache_control: { type: 'ephemeral' } }],
+    })
+    // Other models cache by themselves and get the messages unchanged.
+    await collect(openrouter, { apiKey: 'k', model: 'openai/gpt-5', messages: history })
+    expect(requestOf(fetchMock, 1).body.messages.at(-1)).toEqual({ role: 'user', content: 'again' })
   })
 
   it('maps HTTP and mid-stream errors', async () => {
@@ -270,7 +312,17 @@ describe('Anthropic', () => {
       system: 'Be brief.',
       messages: [{ role: 'user', content: 'hi' }],
       thinking: { type: 'adaptive', display: 'summarized' },
+      cache_control: { type: 'ephemeral' },
       stream: true,
+    })
+  })
+
+  it('reports prompt cache reads and writes', async () => {
+    mockFetch(anthropicStream({ text: ['ok'], usage: { cache_read_input_tokens: 40_000, cache_creation_input_tokens: 300 } }))
+    const events = await collect(anthropic, { apiKey: 'k', model: 'm', messages })
+    expect(events.at(-1)).toEqual({
+      type: 'usage',
+      usage: { promptTokens: 40_310, completionTokens: 5, cachedTokens: 40_000, cacheWriteTokens: 300 },
     })
   })
 

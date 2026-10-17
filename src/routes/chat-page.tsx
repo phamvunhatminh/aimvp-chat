@@ -24,6 +24,7 @@ import { parseModelRef, PROVIDERS } from '@/lib/providers'
 import { stopReading } from '@/lib/read-aloud'
 import { createConversation, updateConversation } from '@/lib/repo'
 import { cn } from '@/lib/utils'
+import { useFallbackModel } from '@/hooks/use-fallback-model'
 import { usePriceLookup } from '@/hooks/use-usage'
 import { formatCost, formatTokens } from '@/lib/format'
 import { chatTotals } from '@/lib/usage'
@@ -167,7 +168,7 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
           <h1 className="mb-7 px-6 text-center text-[1.75rem] font-semibold tracking-tight sm:text-[2rem]">
             What can I help with?
           </h1>
-          {needsKey && <MissingKeyNotice modelRef={model} />}
+          {needsKey && <MissingKeyNotice modelRef={model} onUseModel={changeModel} />}
           {composer('hero')}
         </div>
       ) : (
@@ -176,7 +177,7 @@ function ChatPage({ id, newChatProjectId }: { id: string | undefined; newChatPro
         </div>
       )}
 
-      {!isNewChat && needsKey && <MissingKeyNotice modelRef={model} />}
+      {!isNewChat && needsKey && <MissingKeyNotice modelRef={model} onUseModel={changeModel} />}
       {!isNewChat && (hasAnyKey ? composer('docked') : (hasMessages || newChatProjectId) && <ReconnectBar />)}
     </FileDropZone>
   )
@@ -263,18 +264,27 @@ function FileDropZone({ enabled, children }: { enabled: boolean; children: React
 }
 
 /** The chosen model belongs to a provider the user has no key for yet. */
-function MissingKeyNotice({ modelRef }: { modelRef: string }) {
+function MissingKeyNotice({ modelRef, onUseModel }: { modelRef: string; onUseModel: (ref: string) => void }) {
   const openSettings = useUI((s) => s.openSettings)
   const name = useModelName(modelRef)
   const provider = PROVIDERS[parseModelRef(modelRef).provider].name
+  const fallback = useFallbackModel()
+  const fallbackName = useModelName(fallback ?? '')
   return (
     <div className="mx-auto mb-2 flex w-[calc(100%-1.5rem)] max-w-3xl flex-wrap items-center justify-between gap-2 rounded-xl border bg-muted/50 px-4 py-2 text-sm sm:w-[calc(100%-2rem)]">
       <span className="text-muted-foreground">
-        {name} runs on {provider}. Add your {provider} key, or pick another model above.
+        {name} runs on {provider}. Add your {provider} key, or switch to a model you have a key for.
       </span>
-      <Button variant="outline" size="sm" onClick={() => openSettings('keys')}>
-        Add key
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        {fallback && (
+          <Button size="sm" onClick={() => onUseModel(fallback)}>
+            Use {fallbackName}
+          </Button>
+        )}
+        <Button variant="outline" size="sm" onClick={() => openSettings('keys')}>
+          Add key
+        </Button>
+      </div>
     </div>
   )
 }

@@ -274,7 +274,9 @@ function MessageMeta({ message }: { message: Message }) {
   const name = useModelName(message.model ?? '')
   const parts = [ref && `${name} · ${PROVIDERS[ref.provider].name}`]
   if (message.usage) {
-    parts.push(`${(message.usage.promptTokens + message.usage.completionTokens).toLocaleString()} tokens`)
+    const tokens = message.usage.promptTokens + message.usage.completionTokens
+    const cached = message.usage.cachedTokens ?? 0
+    parts.push(`${tokens.toLocaleString()} tokens${cached > 0 ? ` (${cached.toLocaleString()} cached)` : ''}`)
     const cost = ref ? costOf(message.usage, price(ref.provider, ref.model)) : null
     if (cost) parts.push(`${cost.estimated ? '~' : ''}${formatCost(cost.cost)}`)
   }

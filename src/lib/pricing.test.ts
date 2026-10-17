@@ -29,6 +29,17 @@ describe('makePriceLookup', () => {
 })
 
 describe('costOf', () => {
+  it('prices cached input at the cache rate', () => {
+    const usage = { promptTokens: 10_000, completionTokens: 100, cachedTokens: 9_000, cacheWriteTokens: 500 }
+    // Listed cache prices win; otherwise reads cost a tenth of input and writes a quarter more.
+    expect(costOf(usage, { prompt: 1e-6, completion: 1e-5, cacheRead: 2e-7, cacheWrite: 1e-6 })?.cost).toBeCloseTo(
+      500 * 1e-6 + 9_000 * 2e-7 + 500 * 1e-6 + 100 * 1e-5,
+    )
+    expect(costOf(usage, { prompt: 1e-6, completion: 1e-5 })?.cost).toBeCloseTo(
+      500 * 1e-6 + 9_000 * 1e-7 + 500 * 1.25e-6 + 100 * 1e-5,
+    )
+  })
+
   it('prefers the exact cost and otherwise estimates', () => {
     expect(costOf({ promptTokens: 10, completionTokens: 5, cost: 0.5 }, null)).toEqual({ cost: 0.5, estimated: false })
     expect(costOf({ promptTokens: 1000, completionTokens: 100 }, { prompt: 0.001, completion: 0.01 })).toEqual({

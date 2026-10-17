@@ -28,7 +28,13 @@ export function jsonResponse(body: unknown, status = 200): Response {
 }
 
 /** An Anthropic Messages stream: optional thinking, then text, then the stop reason. */
-export function anthropicStream(opts: { text: string[]; thinking?: string; stopReason?: string }): Response {
+export function anthropicStream(opts: {
+  text: string[]
+  thinking?: string
+  stopReason?: string
+  /** Extra usage on message_start, e.g. prompt cache reads and writes. */
+  usage?: Record<string, number>
+}): Response {
   const events: { type: string; [key: string]: unknown }[] = [
     {
       type: 'message_start',
@@ -40,7 +46,7 @@ export function anthropicStream(opts: { text: string[]; thinking?: string; stopR
         content: [],
         stop_reason: null,
         stop_sequence: null,
-        usage: { input_tokens: 10, output_tokens: 1 },
+        usage: { input_tokens: 10, output_tokens: 1, ...opts.usage },
       },
     },
   ]
